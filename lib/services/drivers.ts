@@ -207,17 +207,17 @@ export function subscribeToDriver(
     .subscribe();
 }
 
-// Get driver profiles from same fraternity that aren't assigned to this event yet
+// Get driver profiles from same organization that aren't assigned to this event yet
 export async function getAvailableDriverProfiles(
   eventId: string,
-  fraternityName: string
+  organizationCode: string
 ): Promise<{ data: Profile[]; error: Error | null }> {
-  // First get all driver profiles from this fraternity
+  // First get all driver profiles from this organization
   const { data: allDrivers, error: driversError } = await supabase
     .from("profiles")
     .select("*")
     .eq("role", "driver")
-    .eq("fraternity_name", fraternityName);
+    .eq("organization_code", organizationCode);
 
   if (driversError) {
     return { data: [], error: new Error(driversError.message) };

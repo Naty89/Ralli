@@ -180,7 +180,7 @@ export default function AdminEventPage() {
 
   const loadAvailableDriverProfiles = async () => {
     if (!profile) return;
-    const { data } = await getAvailableDriverProfiles(eventId, profile.fraternity_name);
+    const { data } = await getAvailableDriverProfiles(eventId, profile.organization_code);
     setAvailableDriverProfiles(data);
   };
 

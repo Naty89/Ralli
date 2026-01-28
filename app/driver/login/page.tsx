@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Car } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
-import { signIn, signUp } from "@/lib/services/auth";
+import { signIn, signUpDriver } from "@/lib/services/auth";
 
 export default function DriverLoginPage() {
   const router = useRouter();
@@ -16,7 +16,7 @@ export default function DriverLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
-  const [fraternityName, setFraternityName] = useState("");
+  const [organizationCode, setOrganizationCode] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,15 +25,17 @@ export default function DriverLoginPage() {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password, fullName, fraternityName, "driver");
+        const { error } = await signUpDriver(email, password, fullName, organizationCode);
         if (error) {
           setError(error.message);
+          setIsLoading(false);
           return;
         }
       } else {
         const { error } = await signIn(email, password);
         if (error) {
           setError(error.message);
+          setIsLoading(false);
           return;
         }
       }
@@ -76,13 +78,17 @@ export default function DriverLoginPage() {
                 required
               />
               <Input
-                label="Fraternity Name"
+                label="Organization Code"
                 type="text"
-                value={fraternityName}
-                onChange={(e) => setFraternityName(e.target.value)}
-                placeholder="Alpha Beta Gamma"
+                value={organizationCode}
+                onChange={(e) => setOrganizationCode(e.target.value.toUpperCase())}
+                placeholder="ABC123"
+                className="uppercase tracking-widest"
                 required
               />
+              <p className="text-xs text-dark-500 -mt-2">
+                Get this code from your admin/event organizer
+              </p>
             </>
           )}
           <Input

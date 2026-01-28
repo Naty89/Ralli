@@ -34,6 +34,7 @@ export interface Profile {
   role: UserRole;
   full_name: string;
   fraternity_name: string;
+  organization_code: string; // Unique code for linking admins and drivers
   created_at: string;
   updated_at: string;
 }
