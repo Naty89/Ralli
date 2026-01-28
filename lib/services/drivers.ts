@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import { Driver, DriverStatus } from "@/types/database";
+import { Driver, DriverStatus, Profile } from "@/types/database";
 
 // Get all drivers for an event
 export async function getEventDrivers(
@@ -205,4 +205,39 @@ export function subscribeToDriver(
       callback
     )
     .subscribe();
+}
+
+// Get driver profiles from same fraternity that aren't assigned to this event yet
+export async function getAvailableDriverProfiles(
+  eventId: string,
+  fraternityName: string
+): Promise<{ data: Profile[]; error: Error | null }> {
+  // First get all driver profiles from this fraternity
+  const { data: allDrivers, error: driversError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("role", "driver")
+    .eq("fraternity_name", fraternityName);
+
+  if (driversError) {
+    return { data: [], error: new Error(driversError.message) };
+  }
+
+  // Get drivers already assigned to this event
+  const { data: assignedDrivers, error: assignedError } = await supabase
+    .from("drivers")
+    .select("profile_id")
+    .eq("event_id", eventId);
+
+  if (assignedError) {
+    return { data: [], error: new Error(assignedError.message) };
+  }
+
+  // Filter out already assigned drivers
+  const assignedIds = new Set(assignedDrivers?.map((d: any) => d.profile_id) || []);
+  const availableProfiles = (allDrivers || []).filter(
+    (profile: any) => !assignedIds.has(profile.id)
+  );
+
+  return { data: availableProfiles as Profile[], error: null };
 }

@@ -33,6 +33,9 @@ import {
 import {
   getEventDrivers,
   subscribeToDrivers,
+  getAvailableDriverProfiles,
+  addDriverToEvent,
+  removeDriverFromEvent,
 } from "@/lib/services/drivers";
 import {
   dispatchAllRides,
@@ -71,6 +74,10 @@ export default function AdminEventPage() {
   // Phase 3: Batch mode state
   const [batchMode, setBatchMode] = useState(false);
   const [isBatchDispatching, setIsBatchDispatching] = useState(false);
+
+  // Add driver modal state
+  const [showAddDriverModal, setShowAddDriverModal] = useState(false);
+  const [availableDriverProfiles, setAvailableDriverProfiles] = useState<Profile[]>([]);
 
   useEffect(() => {
     loadData();
@@ -169,6 +176,24 @@ export default function AdminEventPage() {
   const loadDrivers = async () => {
     const { data } = await getEventDrivers(eventId);
     setDrivers(data);
+  };
+
+  const loadAvailableDriverProfiles = async () => {
+    if (!profile) return;
+    const { data } = await getAvailableDriverProfiles(eventId, profile.fraternity_name);
+    setAvailableDriverProfiles(data);
+  };
+
+  const handleAddDriver = async (profileId: string) => {
+    await addDriverToEvent(eventId, profileId);
+    await loadDrivers();
+    await loadAvailableDriverProfiles();
+  };
+
+  const handleRemoveDriver = async (driverId: string) => {
+    await removeDriverFromEvent(driverId);
+    await loadDrivers();
+    await loadAvailableDriverProfiles();
   };
 
   const handleAssignDriver = async (rideId: string, driverId: string) => {
@@ -532,12 +557,27 @@ export default function AdminEventPage() {
 
           {/* Drivers Panel */}
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">Drivers</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Drivers</h2>
+              <Button
+                size="sm"
+                onClick={() => {
+                  loadAvailableDriverProfiles();
+                  setShowAddDriverModal(true);
+                }}
+              >
+                <UserPlus className="h-4 w-4 mr-1" />
+                Add Driver
+              </Button>
+            </div>
 
             {drivers.length === 0 ? (
               <Card className="text-center py-8">
                 <Users className="h-8 w-8 text-dark-600 mx-auto mb-2" />
                 <p className="text-dark-400 text-sm">No drivers assigned</p>
+                <p className="text-dark-500 text-xs mt-1">
+                  Click "Add Driver" to assign drivers from your fraternity
+                </p>
               </Card>
             ) : (
               <div className="space-y-3">
@@ -550,6 +590,16 @@ export default function AdminEventPage() {
                         </p>
                         <DriverStatusBadge status={driver.current_status} />
                       </div>
+                      {driver.current_status === "offline" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleRemoveDriver(driver.id)}
+                          title="Remove from event"
+                        >
+                          <XCircle className="h-4 w-4 text-red-400" />
+                        </Button>
+                      )}
                     </div>
                   </Card>
                 ))}
@@ -565,6 +615,15 @@ export default function AdminEventPage() {
           drivers={availableDrivers}
           onAssign={(driverId) => handleAssignDriver(selectedRide, driverId)}
           onClose={() => setSelectedRide(null)}
+        />
+      )}
+
+      {/* Add Driver Modal */}
+      {showAddDriverModal && (
+        <AddDriverModal
+          availableProfiles={availableDriverProfiles}
+          onAdd={handleAddDriver}
+          onClose={() => setShowAddDriverModal(false)}
         />
       )}
     </div>
@@ -596,6 +655,53 @@ function AssignDriverModal({
                 className="w-full p-3 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 transition-colors text-left"
               >
                 <p className="font-medium">{driver.profile?.full_name}</p>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <Button variant="secondary" onClick={onClose} className="w-full mt-4">
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddDriverModal({
+  availableProfiles,
+  onAdd,
+  onClose,
+}: {
+  availableProfiles: Profile[];
+  onAdd: (profileId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+      <div className="bg-dark-900 rounded-xl border border-dark-800 max-w-sm w-full p-6">
+        <h2 className="text-lg font-bold mb-4">Add Driver to Event</h2>
+
+        {availableProfiles.length === 0 ? (
+          <div className="text-center py-4">
+            <p className="text-dark-400">No available drivers to add</p>
+            <p className="text-dark-500 text-sm mt-2">
+              Drivers need to sign up first at /driver/login with the same fraternity name
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {availableProfiles.map((driverProfile) => (
+              <button
+                key={driverProfile.id}
+                onClick={() => {
+                  onAdd(driverProfile.id);
+                  onClose();
+                }}
+                className="w-full p-3 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 transition-colors text-left"
+              >
+                <p className="font-medium">{driverProfile.full_name}</p>
+                <p className="text-xs text-dark-500">{driverProfile.fraternity_name}</p>
               </button>
             ))}
           </div>
