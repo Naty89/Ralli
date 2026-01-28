@@ -175,6 +175,3 @@ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
 - Event access codes provide basic access control for riders
 - All database operations go through authenticated Supabase client
 
-## License
-
-MIT
