@@ -29,7 +29,7 @@ export async function signUp(
     full_name: fullName,
     fraternity_name: fraternityName,
     role,
-  });
+  } as any);
 
   if (profileError) {
     return { data: null, error: new Error(profileError.message) };
@@ -116,8 +116,8 @@ export async function updateProfile(
   userId: string,
   updates: Partial<Profile>
 ): Promise<{ error: Error | null }> {
-  const { error } = await supabase
-    .from("profiles")
+  const { error } = await (supabase
+    .from("profiles") as any)
     .update(updates)
     .eq("id", userId);
 

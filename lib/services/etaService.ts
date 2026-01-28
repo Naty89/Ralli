@@ -233,11 +233,11 @@ export async function updateBatchETAs(batchId: string): Promise<void> {
   const driver = Array.isArray(batch.driver) ? batch.driver[0] : batch.driver;
   if (!driver?.current_lat || !driver?.current_lng) return;
 
-  const items = batch.items as Array<{
+  const items = batch.items as unknown as Array<{
     id: string;
     ride_request_id: string;
     pickup_order_index: number;
-    ride_request: { pickup_lat: number; pickup_lng: number };
+    ride_request: { pickup_lat: number; pickup_lng: number } | { pickup_lat: number; pickup_lng: number }[];
   }>;
 
   if (!items || items.length === 0) return;
@@ -248,10 +248,13 @@ export async function updateBatchETAs(batchId: string): Promise<void> {
   );
 
   // Calculate sequential ETAs
-  const stops = sortedItems.map((item) => ({
-    lat: item.ride_request.pickup_lat,
-    lng: item.ride_request.pickup_lng,
-  }));
+  const stops = sortedItems.map((item) => {
+    const req = Array.isArray(item.ride_request) ? item.ride_request[0] : item.ride_request;
+    return {
+      lat: req.pickup_lat,
+      lng: req.pickup_lng,
+    };
+  });
 
   const etas = await calculateBatchETAs(
     driver.current_lat,

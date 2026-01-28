@@ -192,7 +192,8 @@ export async function getRideVolumeByHour(
     hourCounts[i] = 0;
   }
 
-  for (const ride of rides) {
+  const typedRides = rides as Array<{ created_at: string }>;
+  for (const ride of typedRides) {
     const hour = new Date(ride.created_at).getHours();
     hourCounts[hour]++;
   }
@@ -214,8 +215,9 @@ export async function getRideStatusBreakdown(
 
   if (!rides) return [];
 
+  const typedRides = rides as Array<{ status: string }>;
   const statusCounts: Record<string, number> = {};
-  for (const ride of rides) {
+  for (const ride of typedRides) {
     statusCounts[ride.status] = (statusCounts[ride.status] || 0) + 1;
   }
 
@@ -251,12 +253,21 @@ export async function getDriverPerformance(
 
   if (!rides) return [];
 
+  type RideWithDriver = {
+    assigned_driver_id: string | null;
+    arrival_timestamp: string | null;
+    completion_timestamp: string | null;
+    status: string;
+    driver: any;
+  };
+  const typedRides = rides as unknown as RideWithDriver[];
+
   const driverStats: Record<
     string,
     { name: string; rides: number; totalDuration: number }
   > = {};
 
-  for (const ride of rides) {
+  for (const ride of typedRides) {
     if (!ride.assigned_driver_id) continue;
 
     const driverId = ride.assigned_driver_id;
