@@ -10,6 +10,8 @@ import {
   LogOut,
   Power,
   ChevronRight,
+  Copy,
+  CheckCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -25,6 +27,15 @@ export default function AdminDashboardPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyOrgCode = () => {
+    if (profile?.organization_code) {
+      navigator.clipboard.writeText(profile.organization_code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -85,6 +96,32 @@ export default function AdminDashboardPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Organization Code Card */}
+        <Card className="mb-8 bg-gradient-to-r from-primary-900/20 to-dark-900 border-primary-800/30">
+          <div className="p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm text-dark-400 mb-1">Your Driver Code</p>
+              <p className="text-xs text-dark-500">Share this with drivers to join your organization</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl font-mono font-bold tracking-widest text-primary-400">
+                {profile?.organization_code}
+              </span>
+              <button
+                onClick={copyOrgCode}
+                className="p-2 hover:bg-dark-800 rounded-lg transition-colors"
+                title="Copy code"
+              >
+                {copied ? (
+                  <CheckCircle className="h-5 w-5 text-green-400" />
+                ) : (
+                  <Copy className="h-5 w-5 text-dark-400" />
+                )}
+              </button>
+            </div>
+          </div>
+        </Card>
+
         {/* Page Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
