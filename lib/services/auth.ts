@@ -13,6 +13,14 @@ export async function signUp(
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      // Store user metadata that can be used if email confirmation is enabled
+      data: {
+        full_name: fullName,
+        fraternity_name: fraternityName,
+        role,
+      },
+    },
   });
 
   if (authError) {
@@ -23,7 +31,17 @@ export async function signUp(
     return { data: null, error: new Error("Failed to create user") };
   }
 
-  // Create profile
+  // Check if email confirmation is required (user won't have a session)
+  if (!authData.session) {
+    // Email confirmation is enabled - user needs to confirm email first
+    // Profile will be created via database trigger or after confirmation
+    return {
+      data: authData,
+      error: new Error("Please check your email to confirm your account before signing in.")
+    };
+  }
+
+  // Create profile (only if we have a session, meaning email confirmation is disabled)
   const { error: profileError } = await supabase.from("profiles").insert({
     id: authData.user.id,
     full_name: fullName,
