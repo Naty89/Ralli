@@ -8,35 +8,36 @@ const supabaseAdmin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+// Helper to create or get existing user
+async function getOrCreateUser(email: string, password: string) {
+  // Try to create user
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+
+  if (data?.user) {
+    return data.user.id;
+  }
+
+  // If user exists, find them and update password
+  const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+  const existingUser = users?.users?.find(u => u.email === email);
+
+  if (existingUser) {
+    // Update password to match test credentials
+    await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+      password,
+    });
+    return existingUser.id;
+  }
+
+  return null;
+}
+
 export async function POST() {
   try {
-    // Helper to create or get existing user
-    async function getOrCreateUser(email: string, password: string) {
-      // Try to create user
-      const { data, error } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
-
-      if (data?.user) {
-        return data.user.id;
-      }
-
-      // If user exists, find them and update password
-      const { data: users } = await supabaseAdmin.auth.admin.listUsers();
-      const existingUser = users?.users?.find(u => u.email === email);
-
-      if (existingUser) {
-        // Update password to match test credentials
-        await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
-          password,
-        });
-        return existingUser.id;
-      }
-
-      return null;
-    }
 
     // Create test admin user
     const adminId = await getOrCreateUser("admin@test.com", "password123");
