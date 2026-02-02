@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -9,6 +9,12 @@ export const metadata: Metadata = {
   description: "Safe rides for fraternity events",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -17,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={inter.className}>
-        <main className="min-h-screen">{children}</main>
+        <main className="min-h-screen min-h-[100dvh] pb-[env(safe-area-inset-bottom)]">{children}</main>
       </body>
     </html>
   );

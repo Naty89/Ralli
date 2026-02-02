@@ -258,77 +258,79 @@ export default function AdminEventPage() {
     <div className="min-h-screen bg-dark-950">
       {/* Header */}
       <header className="border-b border-dark-800 bg-dark-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          {/* Row 1: Back + Event name */}
+          <div className="flex items-center gap-2 mb-3 sm:mb-0 sm:flex-row sm:justify-between">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <button
                 onClick={() => router.push("/admin/dashboard")}
-                className="p-2 hover:bg-dark-800 rounded-lg transition-colors"
+                className="min-h-[44px] min-w-[44px] p-2 flex items-center justify-center hover:bg-dark-800 rounded-lg transition-colors shrink-0 -ml-2"
               >
                 <ArrowLeft className="h-5 w-5" />
               </button>
-              <div>
-                <h1 className="font-bold">{event?.event_name}</h1>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge variant={event?.is_active ? "available" : "offline"}>
-                    {event?.is_active ? "Active" : "Inactive"}
-                  </Badge>
-                  <button
-                    onClick={copyAccessCode}
-                    className="flex items-center gap-1 text-xs text-dark-400 hover:text-dark-200 font-mono"
-                  >
-                    {event?.access_code}
-                    <Copy className="h-3 w-3" />
-                    {copied && <span className="text-green-400">Copied!</span>}
-                  </button>
-                  <button
-                    onClick={copyShareLink}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs bg-primary-900/40 text-primary-300 hover:bg-primary-900/60 border border-primary-700/50"
-                    title="Copy link to send in a text"
-                  >
-                    <Share2 className="h-3.5 w-3.5" />
-                    Share link
-                    {shareLinkCopied && <span className="text-green-400">Copied!</span>}
-                  </button>
-                </div>
-              </div>
+              <h1 className="font-bold text-base sm:text-lg truncate">{event?.event_name}</h1>
             </div>
-            <div className="flex items-center gap-2">
+          </div>
+          {/* Row 2: Badges + Share + Actions (wrap on mobile) */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={event?.is_active ? "available" : "offline"}>
+                {event?.is_active ? "Active" : "Inactive"}
+              </Badge>
+              <button
+                onClick={copyAccessCode}
+                className="flex items-center gap-1 text-xs text-dark-400 hover:text-dark-200 font-mono min-h-[36px] px-2"
+              >
+                {event?.access_code}
+                <Copy className="h-3 w-3" />
+                {copied && <span className="text-green-400">Copied!</span>}
+              </button>
+              <button
+                onClick={copyShareLink}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs bg-primary-900/40 text-primary-300 hover:bg-primary-900/60 border border-primary-700/50 min-h-[36px]"
+                title="Copy link to send in a text"
+              >
+                <Share2 className="h-3.5 w-3.5 shrink-0" />
+                Share link
+                {shareLinkCopied && <span className="text-green-400">Copied!</span>}
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setShowAnalytics(!showAnalytics)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                   showAnalytics
                     ? "bg-primary-600 text-white"
                     : "bg-dark-800 text-dark-400 hover:bg-dark-700"
                 }`}
               >
-                <BarChart3 className="h-4 w-4" />
-                Analytics
+                <BarChart3 className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Analytics</span>
               </button>
               <button
                 onClick={toggleBatchMode}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                   batchMode
                     ? "bg-purple-600 text-white"
                     : "bg-dark-800 text-dark-400 hover:bg-dark-700"
                 }`}
                 title="Batch nearby pickups together"
               >
-                <Layers className="h-4 w-4" />
-                {batchMode ? "Batch ON" : "Batch"}
+                <Layers className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">{batchMode ? "Batch ON" : "Batch"}</span>
               </button>
               <button
                 onClick={() => setAutoAssign(!autoAssign)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                   autoAssign
                     ? "bg-green-600 text-white"
                     : "bg-dark-800 text-dark-400 hover:bg-dark-700"
                 }`}
               >
-                <Zap className={`h-4 w-4 ${isAutoAssigning ? "animate-pulse" : ""}`} />
-                {autoAssign ? "Smart Dispatch ON" : "Smart Dispatch"}
+                <Zap className={`h-4 w-4 shrink-0 ${isAutoAssigning ? "animate-pulse" : ""}`} />
+                <span className="hidden sm:inline">{autoAssign ? "ON" : "Dispatch"}</span>
               </button>
-              <Button variant="ghost" size="sm" onClick={loadData}>
+              <Button variant="ghost" size="sm" onClick={loadData} className="min-h-[44px] min-w-[44px] p-0">
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
@@ -336,7 +338,7 @@ export default function AdminEventPage() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
         {/* Emergency Banner */}
         {emergencies.length > 0 && (
           <div className="mb-6 space-y-3">
@@ -382,7 +384,7 @@ export default function AdminEventPage() {
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
           <Card className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-yellow-900/30 rounded-lg">
@@ -431,8 +433,8 @@ export default function AdminEventPage() {
 
         {/* Analytics Panel */}
         {showAnalytics && analytics && (
-          <div className="mb-8">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-4">
+          <div className="mb-6 sm:mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4 mb-4">
               <Card className="p-4">
                 <p className="text-xs text-dark-400 mb-1">Total Rides</p>
                 <p className="text-xl font-bold">{analytics.total_rides}</p>
@@ -492,7 +494,7 @@ export default function AdminEventPage() {
           </div>
         )}
 
-        <div className="grid lg:grid-cols-3 gap-8">
+        <div className="grid lg:grid-cols-3 gap-6 sm:gap-8">
           {/* Ride Queue */}
           <div className="lg:col-span-2 space-y-4">
             <h2 className="text-lg font-semibold">Ride Queue</h2>
@@ -508,8 +510,8 @@ export default function AdminEventPage() {
                   .filter((r) => !["completed", "cancelled", "no_show"].includes(r.status))
                   .map((ride, index) => (
                     <Card key={ride.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2">
                             {ride.status === "waiting" && (
                               <span className="text-xs text-dark-500">#{index + 1}</span>
@@ -543,13 +545,14 @@ export default function AdminEventPage() {
                             </div>
                           )}
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 shrink-0">
                           {ride.status === "waiting" && (
                             <>
                               <Button
                                 size="sm"
                                 onClick={() => setSelectedRide(ride.id)}
                                 disabled={availableDrivers.length === 0}
+                                className="min-h-[44px] flex-1 sm:flex-initial"
                               >
                                 Assign
                               </Button>
@@ -557,6 +560,7 @@ export default function AdminEventPage() {
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => handleCancelRide(ride.id)}
+                                className="min-h-[44px] min-w-[44px] p-0"
                               >
                                 <XCircle className="h-4 w-4 text-red-400" />
                               </Button>
@@ -568,6 +572,7 @@ export default function AdminEventPage() {
                               variant="ghost"
                               onClick={() => handleNoShow(ride.id, ride.assigned_driver_id)}
                               title="Mark as No Show"
+                              className="min-h-[44px] min-w-[44px] p-0"
                             >
                               <AlertTriangle className="h-4 w-4 text-orange-400" />
                             </Button>
@@ -665,8 +670,8 @@ function AssignDriverModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-dark-900 rounded-xl border border-dark-800 max-w-sm w-full p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+      <div className="bg-dark-900 rounded-t-2xl sm:rounded-xl border border-dark-800 max-w-sm w-full p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-bold mb-4">Assign Driver</h2>
 
         {drivers.length === 0 ? (
@@ -677,7 +682,7 @@ function AssignDriverModal({
               <button
                 key={driver.id}
                 onClick={() => onAssign(driver.id)}
-                className="w-full p-3 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 transition-colors text-left"
+                className="w-full min-h-[48px] p-4 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 active:scale-[0.98] transition-colors text-left"
               >
                 <p className="font-medium">{driver.profile?.full_name}</p>
               </button>
@@ -703,8 +708,8 @@ function AddDriverModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-dark-900 rounded-xl border border-dark-800 max-w-sm w-full p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+      <div className="bg-dark-900 rounded-t-2xl sm:rounded-xl border border-dark-800 max-w-sm w-full p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-bold mb-4">Add Driver to Event</h2>
 
         {availableProfiles.length === 0 ? (
@@ -723,7 +728,7 @@ function AddDriverModal({
                   onAdd(driverProfile.id);
                   onClose();
                 }}
-                className="w-full p-3 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 transition-colors text-left"
+                className="w-full min-h-[48px] p-4 rounded-lg border border-dark-700 hover:border-primary-500 hover:bg-dark-800 active:scale-[0.98] transition-colors text-left"
               >
                 <p className="font-medium">{driverProfile.full_name}</p>
                 <p className="text-xs text-dark-500">{driverProfile.fraternity_name}</p>

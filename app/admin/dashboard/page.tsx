@@ -91,18 +91,20 @@ export default function AdminDashboardPage() {
     <div className="min-h-screen bg-dark-950">
       {/* Header */}
       <header className="border-b border-dark-800 bg-dark-900/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Car className="h-6 w-6 text-primary-500" />
-              <div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <Car className="h-6 w-6 text-primary-500 shrink-0" />
+              <div className="min-w-0">
                 <span className="font-bold">Ralli</span>
-                <span className="text-dark-500 ml-2">Admin</span>
+                <span className="text-dark-500 ml-1 sm:ml-2">Admin</span>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-dark-400">{profile?.full_name}</span>
-              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+            <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+              <span className="text-xs sm:text-sm text-dark-400 truncate max-w-[100px] sm:max-w-none hidden sm:inline">
+                {profile?.full_name}
+              </span>
+              <Button variant="ghost" size="sm" onClick={handleSignOut} className="min-h-[44px] min-w-[44px] p-0 flex items-center justify-center">
                 <LogOut className="h-4 w-4" />
               </Button>
             </div>
@@ -110,21 +112,21 @@ export default function AdminDashboardPage() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {/* Organization Code Card */}
-        <Card className="mb-8 bg-gradient-to-r from-primary-900/20 to-dark-900 border-primary-800/30">
-          <div className="p-4 flex items-center justify-between">
-            <div>
+        <Card className="mb-6 sm:mb-8 bg-gradient-to-r from-primary-900/20 to-dark-900 border-primary-800/30">
+          <div className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="min-w-0">
               <p className="text-sm text-dark-400 mb-1">Your Driver Code</p>
               <p className="text-xs text-dark-500">Share this with drivers to join your organization</p>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-2xl font-mono font-bold tracking-widest text-primary-400">
+            <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+              <span className="text-xl sm:text-2xl font-mono font-bold tracking-widest text-primary-400 break-all">
                 {profile?.organization_code}
               </span>
               <button
                 onClick={copyOrgCode}
-                className="p-2 hover:bg-dark-800 rounded-lg transition-colors"
+                className="min-h-[44px] min-w-[44px] p-2 flex items-center justify-center hover:bg-dark-800 rounded-lg transition-colors shrink-0"
                 title="Copy code"
               >
                 {copied ? (
@@ -138,12 +140,12 @@ export default function AdminDashboardPage() {
         </Card>
 
         {/* Page Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold">Events</h1>
-            <p className="text-dark-400">{profile?.fraternity_name}</p>
+            <h1 className="text-xl sm:text-2xl font-bold">Events</h1>
+            <p className="text-sm text-dark-400">{profile?.fraternity_name}</p>
           </div>
-          <Button onClick={() => setShowCreateModal(true)}>
+          <Button onClick={() => setShowCreateModal(true)} className="w-full sm:w-auto min-h-[44px]">
             <Plus className="h-4 w-4 mr-2" />
             Create Event
           </Button>
@@ -192,20 +194,20 @@ export default function AdminDashboardPage() {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={(e) => copyEventShareLink(e, event.access_code, event.id)}
-                        className="p-2 rounded-lg bg-dark-800 text-dark-400 hover:bg-dark-700 hover:text-primary-400 transition-colors"
+                        className="min-h-[44px] min-w-[44px] p-2 flex items-center justify-center rounded-lg bg-dark-800 text-dark-400 hover:bg-dark-700 hover:text-primary-400 transition-colors active:scale-95"
                         title="Copy share link (send in a text)"
                       >
                         <Share2 className="h-4 w-4" />
                       </button>
                       {shareLinkCopiedEventId === event.id && (
-                        <span className="text-xs text-green-400">Link copied!</span>
+                        <span className="text-xs text-green-400">Copied!</span>
                       )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleToggleEvent(event.id, event.is_active);
                         }}
-                        className={`p-2 rounded-lg transition-colors ${
+                        className={`min-h-[44px] min-w-[44px] p-2 flex items-center justify-center rounded-lg transition-colors active:scale-95 ${
                           event.is_active
                             ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
                             : "bg-dark-800 text-dark-500 hover:bg-dark-700"
@@ -280,8 +282,8 @@ function CreateEventModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-      <div className="bg-dark-900 rounded-xl border border-dark-800 max-w-md w-full p-6">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+      <div className="bg-dark-900 rounded-t-2xl sm:rounded-xl border border-dark-800 max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-xl font-bold mb-4">Create New Event</h2>
 
         <form onSubmit={handleSubmit} className="space-y-4">
