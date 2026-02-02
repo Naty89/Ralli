@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Copy,
   CheckCircle,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -28,6 +29,20 @@ export default function AdminDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [shareLinkCopiedEventId, setShareLinkCopiedEventId] = useState<string | null>(null);
+
+  const getEventShareLink = (accessCode: string) => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}/rider?code=${encodeURIComponent(accessCode)}`;
+  };
+
+  const copyEventShareLink = (e: React.MouseEvent, accessCode: string, eventId: string) => {
+    e.stopPropagation();
+    const link = getEventShareLink(accessCode);
+    navigator.clipboard.writeText(link);
+    setShareLinkCopiedEventId(eventId);
+    setTimeout(() => setShareLinkCopiedEventId(null), 2000);
+  };
 
   const copyOrgCode = () => {
     if (profile?.organization_code) {
@@ -170,23 +185,35 @@ export default function AdminDashboardPage() {
                   <ChevronRight className="h-5 w-5 text-dark-600" />
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center justify-between text-sm">
+                  <div className="flex items-center justify-between text-sm gap-2">
                     <span className="text-dark-400">
                       {new Date(event.start_time).toLocaleDateString()}
                     </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleEvent(event.id, event.is_active);
-                      }}
-                      className={`p-2 rounded-lg transition-colors ${
-                        event.is_active
-                          ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
-                          : "bg-dark-800 text-dark-500 hover:bg-dark-700"
-                      }`}
-                    >
-                      <Power className="h-4 w-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => copyEventShareLink(e, event.access_code, event.id)}
+                        className="p-2 rounded-lg bg-dark-800 text-dark-400 hover:bg-dark-700 hover:text-primary-400 transition-colors"
+                        title="Copy share link (send in a text)"
+                      >
+                        <Share2 className="h-4 w-4" />
+                      </button>
+                      {shareLinkCopiedEventId === event.id && (
+                        <span className="text-xs text-green-400">Link copied!</span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleEvent(event.id, event.is_active);
+                        }}
+                        className={`p-2 rounded-lg transition-colors ${
+                          event.is_active
+                            ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
+                            : "bg-dark-800 text-dark-500 hover:bg-dark-700"
+                        }`}
+                      >
+                        <Power className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

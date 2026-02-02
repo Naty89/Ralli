@@ -19,6 +19,7 @@ import {
   Timer,
   Layers,
   ShieldAlert,
+  Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -62,6 +63,7 @@ export default function AdminEventPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedRide, setSelectedRide] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [autoAssign, setAutoAssign] = useState(false);
   const [isAutoAssigning, setIsAutoAssigning] = useState(false);
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
@@ -224,6 +226,20 @@ export default function AdminEventPage() {
     }
   };
 
+  const getEventShareLink = () => {
+    if (!event || typeof window === "undefined") return "";
+    return `${window.location.origin}/rider?code=${encodeURIComponent(event.access_code)}`;
+  };
+
+  const copyShareLink = () => {
+    const link = getEventShareLink();
+    if (link) {
+      navigator.clipboard.writeText(link);
+      setShareLinkCopied(true);
+      setTimeout(() => setShareLinkCopied(false), 2000);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -253,7 +269,7 @@ export default function AdminEventPage() {
               </button>
               <div>
                 <h1 className="font-bold">{event?.event_name}</h1>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant={event?.is_active ? "available" : "offline"}>
                     {event?.is_active ? "Active" : "Inactive"}
                   </Badge>
@@ -264,6 +280,15 @@ export default function AdminEventPage() {
                     {event?.access_code}
                     <Copy className="h-3 w-3" />
                     {copied && <span className="text-green-400">Copied!</span>}
+                  </button>
+                  <button
+                    onClick={copyShareLink}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs bg-primary-900/40 text-primary-300 hover:bg-primary-900/60 border border-primary-700/50"
+                    title="Copy link to send in a text"
+                  >
+                    <Share2 className="h-3.5 w-3.5" />
+                    Share link
+                    {shareLinkCopied && <span className="text-green-400">Copied!</span>}
                   </button>
                 </div>
               </div>
