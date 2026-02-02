@@ -32,11 +32,30 @@ export async function setArrivalDeadline(
   }
 }
 
-// Rider confirms presence - "I'm here" button clicked
+// Rider confirms presence - "I'm here" button clicked.
+// Riders are unauthenticated, so RLS blocks direct updates. Use the API route
+// (service role) when in the browser so the update succeeds.
 export async function confirmRiderPresence(
   rideId: string
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
+    if (typeof window !== "undefined") {
+      const res = await fetch("/api/rider/confirm-presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        return {
+          success: false,
+          error: new Error(json.error ?? "Failed to confirm presence"),
+        };
+      }
+      return { success: json.success ?? true, error: null };
+    }
+
+    // Server-side (e.g. tests): use supabase with service role via API or pass client
     const { error } = await supabase
       .from("ride_requests")
       .update({
