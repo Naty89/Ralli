@@ -8,6 +8,7 @@ export async function createRideRequest(
   const insertData: Record<string, any> = {
     event_id: input.event_id,
     rider_name: input.rider_name,
+    rider_phone: input.rider_phone || null,
     pickup_address: input.pickup_address,
     pickup_lat: input.pickup_lat,
     pickup_lng: input.pickup_lng,

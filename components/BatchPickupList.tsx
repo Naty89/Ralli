@@ -1,5 +1,6 @@
 "use client";
 
+import { Phone } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { RideBatchItem, RideRequest } from "@/types/database";
 import { Button } from "@/components/ui/Button";
@@ -106,6 +107,16 @@ export function BatchPickupList({
                     >
                       {ride?.rider_name || "Unknown Rider"}
                     </span>
+                    {ride?.rider_phone && (
+                      <a
+                        href={`tel:${ride.rider_phone.replace(/\D/g, "")}`}
+                        className="flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300 ml-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Phone className="h-3 w-3" />
+                        {ride.rider_phone}
+                      </a>
+                    )}
                     {ride?.passenger_count && ride.passenger_count > 1 && (
                       <span className="text-xs bg-dark-700 text-dark-300 px-1.5 py-0.5 rounded">
                         +{ride.passenger_count - 1}

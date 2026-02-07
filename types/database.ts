@@ -78,6 +78,7 @@ export interface RideRequest {
   id: string;
   event_id: string;
   rider_name: string;
+  rider_phone?: string;
   pickup_address: string;
   pickup_lat: number;
   pickup_lng: number;
@@ -201,6 +202,7 @@ export interface CreateEventInput {
 export interface CreateRideRequestInput {
   event_id: string;
   rider_name: string;
+  rider_phone?: string;
   pickup_address: string;
   pickup_lat: number;
   pickup_lng: number;

@@ -20,6 +20,7 @@ import {
   Layers,
   ShieldAlert,
   Share2,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -523,6 +524,15 @@ export default function AdminEventPage() {
                             <MapPin className="h-4 w-4 shrink-0 mt-0.5" />
                             <span>{ride.pickup_address}</span>
                           </div>
+                          {ride.rider_phone && (
+                            <a
+                              href={`tel:${ride.rider_phone.replace(/\D/g, "")}`}
+                              className="flex items-center gap-1.5 text-sm text-primary-400 hover:text-primary-300 mt-1"
+                            >
+                              <Phone className="h-3.5 w-3.5 shrink-0" />
+                              {ride.rider_phone}
+                            </a>
+                          )}
                           <div className="flex items-center gap-4 mt-2 text-sm">
                             <span className="text-dark-500">
                               {ride.passenger_count} passenger{ride.passenger_count > 1 ? "s" : ""}

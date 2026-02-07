@@ -60,6 +60,7 @@ function RiderContent() {
 
   // Form state
   const [riderName, setRiderName] = useState("");
+  const [riderPhone, setRiderPhone] = useState("");
   const [pickupAddress, setPickupAddress] = useState("");
   const [pickupLat, setPickupLat] = useState(0);
   const [pickupLng, setPickupLng] = useState(0);
@@ -253,6 +254,12 @@ function RiderContent() {
       return;
     }
 
+    const phoneDigits = riderPhone.replace(/\D/g, "");
+    if (phoneDigits.length < 10) {
+      setError("Please enter a valid phone number (at least 10 digits)");
+      return;
+    }
+
     // Check if rider needs to accept TOS first
     if (!hasConsent) {
       setShowTOSModal(true);
@@ -275,6 +282,7 @@ function RiderContent() {
     const { data, error: createError } = await createRideRequest({
       event_id: event!.id,
       rider_name: riderName,
+      rider_phone: riderPhone.trim(),
       pickup_address: pickupAddress,
       pickup_lat: lat,
       pickup_lng: lng,
@@ -382,6 +390,15 @@ function RiderContent() {
                   value={riderName}
                   onChange={(e) => setRiderName(e.target.value)}
                   placeholder="John Smith"
+                  required
+                />
+
+                <Input
+                  label="Phone Number"
+                  type="tel"
+                  value={riderPhone}
+                  onChange={(e) => setRiderPhone(e.target.value)}
+                  placeholder="(555) 123-4567"
                   required
                 />
 
@@ -591,6 +608,7 @@ function RiderContent() {
                     setStep("form");
                     setRideRequest(null);
                     setRiderName("");
+                    setRiderPhone("");
                     setPickupAddress("");
                     setPassengerCount(1);
                   }}

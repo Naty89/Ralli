@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Power,
   Clock,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
@@ -392,6 +393,15 @@ export default function DriverDashboardPage() {
               <div>
                 <p className="text-sm text-dark-400">Rider</p>
                 <p className="font-medium text-lg">{currentRide.rider_name}</p>
+                {currentRide.rider_phone && (
+                  <a
+                    href={`tel:${currentRide.rider_phone.replace(/\D/g, "")}`}
+                    className="flex items-center gap-2 mt-1 text-primary-400 hover:text-primary-300 text-sm"
+                  >
+                    <Phone className="h-4 w-4" />
+                    {currentRide.rider_phone}
+                  </a>
+                )}
               </div>
 
               {/* Pickup Address */}
