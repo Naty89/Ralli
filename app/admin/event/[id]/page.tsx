@@ -19,7 +19,8 @@ import {
   Timer,
   Layers,
   ShieldAlert,
-  Share2,
+    Share2,
+    Power,
   Phone,
   History,
 } from "lucide-react";
@@ -39,6 +40,7 @@ import {
   getAvailableDriverProfiles,
   addDriverToEvent,
   removeDriverFromEvent,
+  updateDriverStatus,
 } from "@/lib/services/drivers";
 import {
   dispatchAllRides,
@@ -208,6 +210,12 @@ export default function AdminEventPage() {
     await removeDriverFromEvent(driverId);
     await loadDrivers();
     await loadAvailableDriverProfiles();
+  };
+
+  const handleToggleDriverStatus = async (driverId: string, currentStatus: string) => {
+    const newStatus = currentStatus === "offline" ? "available" : "offline";
+    await updateDriverStatus(driverId, newStatus as any);
+    await loadDrivers();
   };
 
   const handleAssignDriver = async (rideId: string, driverId: string) => {
@@ -728,16 +736,27 @@ export default function AdminEventPage() {
                         </p>
                         <DriverStatusBadge status={driver.current_status} />
                       </div>
-                      {driver.current_status === "offline" && (
+                      <div className="flex items-center gap-2">
                         <Button
                           size="sm"
-                          variant="ghost"
-                          onClick={() => handleRemoveDriver(driver.id)}
-                          title="Remove from event"
+                          variant={driver.current_status === "offline" ? "success" : "ghost"}
+                          onClick={() => handleToggleDriverStatus(driver.id, driver.current_status)}
+                          title={driver.current_status === "offline" ? "Bring online" : "Set offline"}
                         >
-                          <XCircle className="h-4 w-4 text-red-400" />
+                          <Power className={`h-4 w-4 ${driver.current_status === "offline" ? "text-green-400" : "text-dark-300"}`} />
                         </Button>
-                      )}
+
+                        {driver.current_status === "offline" && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleRemoveDriver(driver.id)}
+                            title="Remove from event"
+                          >
+                            <XCircle className="h-4 w-4 text-red-400" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </Card>
                 ))}
