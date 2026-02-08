@@ -254,6 +254,10 @@ function RiderContent() {
       return;
     }
 
+    if (!riderPhone.trim()) {
+      setError("Phone number is required");
+      return;
+    }
     const phoneDigits = riderPhone.replace(/\D/g, "");
     if (phoneDigits.length < 10) {
       setError("Please enter a valid phone number (at least 10 digits)");
@@ -297,6 +301,7 @@ function RiderContent() {
     }
 
     setRideRequest(data);
+    setError(""); // Clear any prior error
 
     // Get initial queue position
     const pos = await getQueuePosition(data.id, event!.id);

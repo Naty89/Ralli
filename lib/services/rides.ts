@@ -1,10 +1,46 @@
 import { supabase } from "@/lib/supabaseClient";
 import { RideRequest, CreateRideRequestInput, RideStatus } from "@/types/database";
 
-// Create a new ride request
+// Check for existing active ride (prevents duplicates when rider closes window and re-submits)
+async function getExistingActiveRide(
+  eventId: string,
+  riderIdentifierHash: string | undefined
+): Promise<RideRequest | null> {
+  if (!riderIdentifierHash) return null;
+  const { data } = await supabase
+    .from("ride_requests")
+    .select("*")
+    .eq("event_id", eventId)
+    .eq("rider_identifier_hash", riderIdentifierHash)
+    .in("status", ["waiting", "assigned", "arrived", "in_progress"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
+// Create a new ride request (returns existing active ride if rider already has one - prevents duplicates)
 export async function createRideRequest(
   input: CreateRideRequestInput
 ): Promise<{ data: RideRequest | null; error: Error | null }> {
+  // Phone number is required
+  const phoneDigits = (input.rider_phone || "").replace(/\D/g, "");
+  if (phoneDigits.length < 10) {
+    return {
+      data: null,
+      error: new Error("Phone number is required (at least 10 digits)"),
+    };
+  }
+
+  // Prevent duplicate: if rider already has an active ride, return that instead
+  const existing = await getExistingActiveRide(
+    input.event_id,
+    input.rider_identifier_hash
+  );
+  if (existing) {
+    return { data: existing, error: null };
+  }
+
   const insertData: Record<string, any> = {
     event_id: input.event_id,
     rider_name: input.rider_name,

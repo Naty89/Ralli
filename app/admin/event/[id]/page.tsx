@@ -52,6 +52,7 @@ import {
   subscribeToEmergencies,
 } from "@/lib/services/emergencyService";
 import { batchDispatch } from "@/lib/services/batchService";
+import { AdminDriverMap } from "@/components/AdminDriverMap";
 import { Event, RideRequest, Driver, Profile, EventAnalytics, EmergencyEvent } from "@/types/database";
 
 export default function AdminEventPage() {
@@ -399,6 +400,12 @@ export default function AdminEventPage() {
             ))}
           </div>
         )}
+
+        {/* Driver Map */}
+        <div className="mb-6 sm:mb-8">
+          <h2 className="text-lg font-semibold mb-3">Driver Locations</h2>
+          <AdminDriverMap drivers={drivers} />
+        </div>
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
