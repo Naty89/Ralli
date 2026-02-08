@@ -67,6 +67,7 @@ export default function AdminEventPage() {
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [autoAssign, setAutoAssign] = useState(false);
   const [isAutoAssigning, setIsAutoAssigning] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(false);
 
@@ -115,10 +116,17 @@ export default function AdminEventPage() {
 
   const runAutoAssign = async () => {
     setIsAutoAssigning(true);
-    if (batchMode) {
-      await batchDispatch(eventId);
-    } else {
-      await dispatchAllRides(eventId);
+    setDispatchError(null);
+    try {
+      if (batchMode) {
+        const result = await batchDispatch(eventId);
+        if (result.error) setDispatchError(result.error.message);
+      } else {
+        const result = await dispatchAllRides(eventId);
+        if (result.error) setDispatchError(result.error.message);
+      }
+    } catch (err) {
+      setDispatchError(err instanceof Error ? err.message : "Dispatch failed");
     }
     await loadRides();
     await loadDrivers();
@@ -340,6 +348,14 @@ export default function AdminEventPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+        {/* Dispatch Error */}
+        {dispatchError && (
+          <div className="mb-4 p-3 rounded-lg bg-red-500/20 border border-red-500/50 text-red-400 text-sm flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {dispatchError}
+          </div>
+        )}
+
         {/* Emergency Banner */}
         {emergencies.length > 0 && (
           <div className="mb-6 space-y-3">

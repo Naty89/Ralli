@@ -86,7 +86,8 @@ export async function getWaitingRidesByCluster(
   }
 }
 
-// Find available drivers with sufficient capacity
+// Find available drivers with sufficient capacity.
+// Location is optional: prefer drivers with location for distance sorting, but include drivers without (e.g. desktop).
 export async function findAvailableDriversWithCapacity(
   eventId: string,
   requiredCapacity: number
@@ -97,9 +98,7 @@ export async function findAvailableDriversWithCapacity(
       .select("*, profile:profiles(*)")
       .eq("event_id", eventId)
       .eq("is_online", true)
-      .eq("current_status", "available")
-      .not("current_lat", "is", null)
-      .not("current_lng", "is", null);
+      .eq("current_status", "available");
 
     if (error) {
       return { data: null, error: new Error(error.message) };

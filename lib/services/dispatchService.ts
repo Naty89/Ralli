@@ -28,13 +28,15 @@ function toRad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
-// Find the nearest available driver for a pickup location
+// Find the nearest available driver for a pickup location.
+// If no drivers have location yet (e.g. desktop or geolocation pending), fall back to first available driver.
 export async function findNearestDriver(
   eventId: string,
   pickupLat: number,
   pickupLng: number
 ): Promise<{ driver: Driver | null; distance: number | null }> {
-  const { data: drivers, error } = await supabase
+  // First try: drivers with location (preferred)
+  const { data: driversWithLocation, error: err1 } = await supabase
     .from("drivers")
     .select(`*, profile:profiles(*)`)
     .eq("event_id", eventId)
@@ -43,34 +45,42 @@ export async function findNearestDriver(
     .not("current_lat", "is", null)
     .not("current_lng", "is", null) as { data: Driver[] | null; error: any };
 
-  if (error || !drivers || drivers.length === 0) {
-    return { driver: null, distance: null };
-  }
-
-  // Calculate distances and find nearest
-  let nearestDriver: Driver | null = null;
-  let minDistance = Infinity;
-
-  for (const driver of drivers) {
-    if (driver.current_lat && driver.current_lng) {
-      const distance = haversineDistance(
-        pickupLat,
-        pickupLng,
-        driver.current_lat,
-        driver.current_lng
-      );
-
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestDriver = driver;
+  if (!err1 && driversWithLocation && driversWithLocation.length > 0) {
+    let nearestDriver: Driver | null = null;
+    let minDistance = Infinity;
+    for (const driver of driversWithLocation) {
+      if (driver.current_lat && driver.current_lng) {
+        const distance = haversineDistance(
+          pickupLat,
+          pickupLng,
+          driver.current_lat,
+          driver.current_lng
+        );
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestDriver = driver;
+        }
       }
+    }
+    if (nearestDriver) {
+      return { driver: nearestDriver, distance: minDistance };
     }
   }
 
-  return {
-    driver: nearestDriver,
-    distance: nearestDriver ? minDistance : null,
-  };
+  // Fallback: any available driver (for desktop or when location not yet shared)
+  const { data: anyDrivers, error: err2 } = await supabase
+    .from("drivers")
+    .select(`*, profile:profiles(*)`)
+    .eq("event_id", eventId)
+    .eq("is_online", true)
+    .eq("current_status", "available")
+    .limit(1) as { data: Driver[] | null; error: any };
+
+  if (err2 || !anyDrivers || anyDrivers.length === 0) {
+    return { driver: null, distance: null };
+  }
+
+  return { driver: anyDrivers[0], distance: null };
 }
 
 // Get the oldest waiting ride for an event
