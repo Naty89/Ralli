@@ -9,10 +9,17 @@ interface AdminDriverMapProps {
   className?: string;
 }
 
+const STATUS_COLORS: Record<string, string> = {
+  available: "#10b981",
+  assigned: "#3b82f6",
+  offline: "#6b7280",
+};
+
 export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
   const driversWithLocation = drivers.filter(
     (d) => d.current_lat != null && d.current_lng != null
@@ -29,6 +36,7 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
     });
 
     loader.load().then(() => {
+      infoWindowRef.current = new google.maps.InfoWindow();
       const mapInstance = new google.maps.Map(mapRef.current!, {
         center: { lat: 40.7128, lng: -74.006 },
         zoom: 12,
@@ -65,12 +73,6 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
   useEffect(() => {
     if (!map) return;
 
-    const statusColors: Record<string, string> = {
-      available: "#10b981", // green
-      assigned: "#3b82f6", // blue
-      offline: "#6b7280",  // gray
-    };
-
     const currentDriverIds = new Set(driversWithLocation.map((d) => d.id));
 
     // Remove markers for drivers no longer in list or without location
@@ -88,8 +90,9 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
     driversWithLocation.forEach((driver) => {
       const lat = driver.current_lat!;
       const lng = driver.current_lng!;
-      const color = statusColors[driver.current_status] || "#6b7280";
+      const color = STATUS_COLORS[driver.current_status] || "#6b7280";
       const name = driver.profile?.full_name || "Driver";
+      const status = driver.current_status;
 
       let marker = markersRef.current.get(driver.id);
       if (!marker) {
@@ -104,7 +107,18 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
             strokeColor: "#ffffff",
             strokeWeight: 2,
           },
-          title: `${name} (${driver.current_status})`,
+          title: `${name} (${status}) - Click for details`,
+        });
+        marker.addListener("click", () => {
+          if (infoWindowRef.current) {
+            infoWindowRef.current.setContent(
+              `<div style="padding:8px;min-width:140px;color:#1f2937;">
+                <strong style="color:#111;">${name}</strong><br/>
+                <span style="color:#6b7280;font-size:12px;text-transform:capitalize;">${status}</span>
+              </div>`
+            );
+            infoWindowRef.current.open(map, marker!);
+          }
         });
         markersRef.current.set(driver.id, marker);
       } else {
@@ -117,7 +131,7 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
           strokeColor: "#ffffff",
           strokeWeight: 2,
         });
-        marker.setTitle(`${name} (${driver.current_status})`);
+        marker.setTitle(`${name} (${status})`);
       }
 
       bounds.extend({ lat, lng });
@@ -140,6 +154,26 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
               Drivers need to go online on their device to appear on the map
             </p>
           </div>
+        </div>
+      )}
+      {/* Legend: identify drivers by name */}
+      {driversWithLocation.length > 0 && (
+        <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-2 p-2 bg-dark-900/95 rounded-lg">
+          {driversWithLocation.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center gap-1.5 px-2 py-1 rounded text-xs"
+              style={{
+                backgroundColor: `${STATUS_COLORS[d.current_status] || "#6b7280"}20`,
+                borderLeft: `3px solid ${STATUS_COLORS[d.current_status] || "#6b7280"}`,
+              }}
+            >
+              <span className="font-medium text-dark-100">
+                {d.profile?.full_name || "Driver"}
+              </span>
+              <span className="text-dark-500 capitalize">({d.current_status})</span>
+            </div>
+          ))}
         </div>
       )}
     </div>

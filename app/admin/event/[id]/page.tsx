@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   Share2,
   Phone,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -71,6 +72,7 @@ export default function AdminEventPage() {
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showRideHistory, setShowRideHistory] = useState(false);
 
   // Phase 2.5: Emergency state
   const [emergencies, setEmergencies] = useState<EmergencyEvent[]>([]);
@@ -318,6 +320,18 @@ export default function AdminEventPage() {
                 <span className="hidden sm:inline">Analytics</span>
               </button>
               <button
+                onClick={() => setShowRideHistory(!showRideHistory)}
+                className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
+                  showRideHistory
+                    ? "bg-primary-600 text-white"
+                    : "bg-dark-800 text-dark-400 hover:bg-dark-700"
+                }`}
+                title="Who was driven by whom"
+              >
+                <History className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Ride History</span>
+              </button>
+              <button
                 onClick={toggleBatchMode}
                 className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                   batchMode
@@ -514,6 +528,67 @@ export default function AdminEventPage() {
                   </p>
                 </Card>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* Ride History - who was driven by whom */}
+        {showRideHistory && (
+          <div className="mb-6 sm:mb-8">
+            <h2 className="text-lg font-semibold mb-3">Ride History</h2>
+            <p className="text-sm text-dark-400 mb-4">
+              Completed rides for this event — who was driven by whom
+            </p>
+            {completedRides.length === 0 ? (
+              <Card className="text-center py-8">
+                <History className="h-8 w-8 text-dark-600 mx-auto mb-2" />
+                <p className="text-dark-400">No completed rides yet</p>
+              </Card>
+            ) : (
+              <Card className="overflow-hidden">
+                <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-dark-800/50 sticky top-0">
+                      <tr>
+                        <th className="text-left py-3 px-4 font-medium text-dark-300">Rider</th>
+                        <th className="text-left py-3 px-4 font-medium text-dark-300">Driver</th>
+                        <th className="text-left py-3 px-4 font-medium text-dark-300">Completed</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...completedRides]
+                        .sort(
+                          (a, b) =>
+                            new Date(b.completion_timestamp || 0).getTime() -
+                            new Date(a.completion_timestamp || 0).getTime()
+                        )
+                        .map((ride) => (
+                        <tr
+                          key={ride.id}
+                          className="border-t border-dark-800 hover:bg-dark-800/30"
+                        >
+                          <td className="py-3 px-4">
+                            <span className="font-medium">{ride.rider_name}</span>
+                            {ride.passenger_count > 1 && (
+                              <span className="text-dark-500 text-xs ml-1">
+                                (+{ride.passenger_count - 1})
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-primary-400">
+                            {ride.driver?.profile?.full_name || "—"}
+                          </td>
+                          <td className="py-3 px-4 text-dark-400">
+                            {ride.completion_timestamp
+                              ? new Date(ride.completion_timestamp).toLocaleString()
+                              : "—"}
+                          </td>
+                        </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             )}
           </div>
         )}
