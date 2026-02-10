@@ -76,7 +76,30 @@ export async function POST(request: Request) {
     // Check for existing active ride
     const existing = await getExistingActiveRide(event_id, identifier, phoneForId);
     if (existing) {
-      return NextResponse.json({ data: existing });
+      // Update existing ride with any new/changed fields (passenger count, pickup, phone)
+      const admin = createAdminClient();
+      const updateFields: any = {
+        rider_name,
+        rider_phone: rider_phone || null,
+        rider_phone_normalized: phoneForId || null,
+        pickup_address: pickup_address ?? existing.pickup_address,
+        pickup_lat: pickup_lat ?? existing.pickup_lat,
+        pickup_lng: pickup_lng ?? existing.pickup_lng,
+        passenger_count: passenger_count ?? existing.passenger_count,
+      };
+
+      const { data: updated, error: updErr } = await admin
+        .from("ride_requests")
+        .update(updateFields)
+        .eq("id", existing.id)
+        .select()
+        .single();
+
+      if (updErr) {
+        return NextResponse.json({ error: updErr.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ data: updated });
     }
 
     // Insert new ride using admin client
