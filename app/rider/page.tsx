@@ -28,19 +28,10 @@ import { EmergencyButton } from "@/components/EmergencyButton";
 import { CooldownNotice } from "@/components/CooldownNotice";
 import { BatchPosition } from "@/components/BatchPickupList";
 import { getEventByAccessCode } from "@/lib/services/events";
-import {
-  createRideRequest,
-  getRideRequestById,
-  getQueuePosition,
-  subscribeToRideRequest,
-} from "@/lib/services/rides";
+import { getRideRequestById, getQueuePosition, subscribeToRideRequest } from "@/lib/services/rides";
 import { subscribeToDriver } from "@/lib/services/drivers";
 import { formatETA } from "@/lib/services/etaService";
-import {
-  generateRiderIdentifierHash,
-  checkConsent,
-  recordConsent,
-} from "@/lib/services/consentService";
+import { checkConsent, recordConsent } from "@/lib/services/consentService";
 import { getCooldownStatus, confirmRiderPresence } from "@/lib/services/safetyService";
 import { triggerEmergency } from "@/lib/services/emergencyService";
 import { getRideBatchPosition } from "@/lib/services/batchService";
@@ -90,6 +81,32 @@ function RiderContent() {
     if (initialCode) {
       handleCodeSubmit();
     }
+  }, []);
+
+  // Client-side rehydration: check localStorage for existing ride id
+  useEffect(() => {
+    const tryRehydrate = async () => {
+      try {
+        const stored = localStorage.getItem("ralli_ride_id");
+        if (!stored) return;
+        const { data, error } = await getRideRequestById(stored);
+        if (error || !data) {
+          localStorage.removeItem("ralli_ride_id");
+          return;
+        }
+        // If ride is still active, set and show status
+        if (["waiting", "assigned", "arrived", "in_progress"].includes(data.status)) {
+          setRideRequest(data);
+          setStep("status");
+        } else {
+          localStorage.removeItem("ralli_ride_id");
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    tryRehydrate();
   }, []);
 
   // Get user location for emergency reporting
@@ -179,21 +196,32 @@ function RiderContent() {
   const checkRiderStatus = useCallback(async () => {
     if (!event || !riderName.trim()) return;
 
-    // Generate hash (using placeholder IP for now - in production, get from API)
-    const hash = await generateRiderIdentifierHash(
-      event.id,
-      riderName.trim(),
-      "client-ip" // In production, fetch actual IP from an API route
-    );
-    setRiderHash(hash);
+    // Request server to generate stable rider identifier (uses IP + UA)
+    try {
+      const resp = await fetch(
+        `/api/rides?event_id=${encodeURIComponent(event.id)}&rider_name=${encodeURIComponent(
+          riderName.trim()
+        )}`,
+        { method: "GET" }
+      );
+      const json = await resp.json();
+      if (json) {
+        const identifier = json.identifier || (json.data && json.data.rider_identifier_hash) || null;
+        if (identifier) {
+          setRiderHash(identifier);
 
-    // Check consent
-    const { hasConsent: consent } = await checkConsent(event.id, hash);
-    setHasConsent(consent);
+          // Check consent
+          const { hasConsent: consent } = await checkConsent(event.id, identifier);
+          setHasConsent(consent);
 
-    // Check cooldown
-    const { data: cooldown } = await getCooldownStatus(event.id, hash);
-    setCooldownStatus(cooldown);
+          // Check cooldown
+          const { data: cooldown } = await getCooldownStatus(event.id, identifier);
+          setCooldownStatus(cooldown);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to identify rider:", err);
+    }
   }, [event, riderName]);
 
   useEffect(() => {
@@ -276,6 +304,7 @@ function RiderContent() {
       return;
     }
 
+
     setIsLoading(true);
     setError("");
 
@@ -283,25 +312,37 @@ function RiderContent() {
     const lat = pickupLat || 40.7128;
     const lng = pickupLng || -74.006;
 
-    const { data, error: createError } = await createRideRequest({
-      event_id: event!.id,
-      rider_name: riderName,
-      rider_phone: riderPhone.trim(),
-      pickup_address: pickupAddress,
-      pickup_lat: lat,
-      pickup_lng: lng,
-      passenger_count: passengerCount,
-      rider_identifier_hash: riderHash,
+    // Call server API to create ride idempotently
+    const resp = await fetch(`/api/rides`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_id: event!.id,
+        rider_name: riderName,
+        rider_phone: riderPhone.trim(),
+        pickup_address: pickupAddress,
+        pickup_lat: lat,
+        pickup_lng: lng,
+        passenger_count: passengerCount,
+      }),
     });
 
-    if (createError || !data) {
-      setError(createError?.message || "Failed to create ride request");
+    const json = await resp.json();
+    if (!resp.ok || json.error) {
+      setError(json.error || "Failed to create ride request");
       setIsLoading(false);
       return;
     }
 
-    setRideRequest(data);
+    const data = json.data;
+
+    setRideRequest(data as RideRequest);
     setError(""); // Clear any prior error
+
+    // Store ride id for client-side rehydration
+    try {
+      localStorage.setItem("ralli_ride_id", data.id);
+    } catch {}
 
     // Get initial queue position
     const pos = await getQueuePosition(data.id, event!.id);
