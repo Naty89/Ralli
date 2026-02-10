@@ -14,19 +14,38 @@ export function generateRiderIdentifier(
   return crypto.createHash("sha256").update(normalized).digest("hex");
 }
 
+export function normalizePhone(phone?: string): string | null {
+  if (!phone) return null;
+  const digits = (phone || "").replace(/\D/g, "");
+  // Require at least 10 digits to consider it valid
+  if (digits.length < 10) return null;
+  return digits;
+}
+
 // Check for existing active ride for this rider identifier
-export async function getExistingActiveRide(eventId: string, riderIdentifier: string) {
+export async function getExistingActiveRide(
+  eventId: string,
+  riderIdentifier: string | null,
+  normalizedPhone?: string | null
+) {
   const admin = createAdminClient();
-  const { data, error } = await admin
+
+  let query = admin
     .from("ride_requests")
     .select("*")
     .eq("event_id", eventId)
-    .eq("rider_identifier_hash", riderIdentifier)
     .in("status", ACTIVE_STATUSES)
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
 
+  if (normalizedPhone) {
+    // prefer matching by normalized phone if available
+    query = query.or(`rider_phone_normalized.eq.${normalizedPhone},rider_identifier_hash.eq.${riderIdentifier || ""}`);
+  } else if (riderIdentifier) {
+    query = query.eq("rider_identifier_hash", riderIdentifier);
+  }
+
+  const { data, error } = await query.maybeSingle();
   if (error) throw new Error(error.message);
   return data;
 }

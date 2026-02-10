@@ -58,7 +58,13 @@ export async function POST(request: Request) {
 
     const ip = getIp(request);
     const ua = request.headers.get("user-agent") || "";
-    const identifier = generateRiderIdentifier(event_id, rider_name, ip, ua);
+    // Prefer normalized phone for stable identification
+    const rawPhone = rider_phone || null;
+    const normalizedPhone = rawPhone ? rawPhone.replace(/\D/g, "") : null;
+    const phoneForId = normalizedPhone && normalizedPhone.length >= 10 ? normalizedPhone : null;
+    const identifier = phoneForId
+      ? crypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex")
+      : generateRiderIdentifier(event_id, rider_name, ip, ua);
 
     // Rate limit check
     const rate = await checkAndUpdateRateLimit(event_id, identifier);
@@ -67,7 +73,7 @@ export async function POST(request: Request) {
     }
 
     // Check for existing active ride
-    const existing = await getExistingActiveRide(event_id, identifier);
+    const existing = await getExistingActiveRide(event_id, identifier, phoneForId);
     if (existing) {
       return NextResponse.json({ data: existing });
     }
@@ -78,6 +84,7 @@ export async function POST(request: Request) {
       event_id,
       rider_name,
       rider_phone: rider_phone || null,
+      rider_phone_normalized: phoneForId || null,
       pickup_address: pickup_address || null,
       pickup_lat: pickup_lat || null,
       pickup_lng: pickup_lng || null,
