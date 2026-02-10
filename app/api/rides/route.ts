@@ -5,6 +5,7 @@ import {
   getExistingActiveRide,
   checkAndUpdateRateLimit,
 } from "@/lib/services/rideGuardService";
+import nodeCrypto from "crypto";
 
 const ACTIVE_STATUSES = ["waiting", "assigned", "arrived", "in_progress"];
 
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     const normalizedPhone = rawPhone ? rawPhone.replace(/\D/g, "") : null;
     const phoneForId = normalizedPhone && normalizedPhone.length >= 10 ? normalizedPhone : null;
     const identifier = phoneForId
-      ? crypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex")
+      ? nodeCrypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex")
       : generateRiderIdentifier(event_id, rider_name, ip, ua);
 
     // Rate limit check
