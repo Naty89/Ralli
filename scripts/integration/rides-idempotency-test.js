@@ -1,9 +1,10 @@
 // Simple integration script to test /api/rides idempotency.
-// Usage: start your dev server (npm run dev) and then run:
-//   node scripts/integration/rides-idempotency-test.js
+// Usage: Target a deployed URL and event id via env or CLI:
+//   BASE_URL=https://myapp.vercel.app EVENT_ID=<event_id> node scripts/integration/rides-idempotency-test.js
+// Or pass args: node scripts/integration/rides-idempotency-test.js https://myapp.vercel.app <event_id>
 
-const BASE = process.env.BASE_URL || 'http://localhost:3000';
-const eventId = process.env.EVENT_ID || '<YOUR_EVENT_ID>'; // replace or set env
+const BASE = process.env.BASE_URL || process.argv[2] || 'http://localhost:3000';
+const eventId = process.env.EVENT_ID || process.argv[3] || '<YOUR_EVENT_ID>'; // set env or pass as arg
 
 function uuid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
