@@ -17,8 +17,14 @@ async function postRide(payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const json = await res.json();
-  return { ok: res.ok, status: res.status, body: json };
+  const text = await res.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch (err) {
+    // leave parsed null and return raw text for debugging
+  }
+  return { ok: res.ok, status: res.status, body: parsed, raw: text };
 }
 
 (async function run() {
