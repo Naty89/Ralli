@@ -77,6 +77,11 @@ export async function POST(request: Request) {
     // Rate limit check
     const rate = await checkAndUpdateRateLimit(event_id, identifier);
     if (!rate.allowed) {
+      // If a recent active ride already exists for this identifier, return it
+      const existingOnRateLimit = await getExistingActiveRide(event_id, identifier, phoneForId);
+      if (existingOnRateLimit) {
+        return NextResponse.json({ data: existingOnRateLimit });
+      }
       return NextResponse.json({ error: "Please wait before requesting another ride." }, { status: 429 });
     }
 

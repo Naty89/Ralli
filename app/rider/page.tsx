@@ -352,6 +352,30 @@ function RiderContent() {
 
     const json = await resp.json();
     if (!resp.ok || json.error) {
+      // If rate limited, attempt to fetch existing ride by identifier/client_id
+      if (resp.status === 429) {
+        try {
+          const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
+          if (clientId) params.set("client_id", clientId);
+          const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
+          const checkJson = await check.json();
+          if (check.ok && checkJson && (checkJson.data || checkJson.identifier)) {
+            const existing = checkJson.data || null;
+            if (existing) {
+              setRideRequest(existing as RideRequest);
+              try { localStorage.setItem("ralli_ride_id", existing.id); } catch {}
+              const pos = await getQueuePosition(existing.id, event!.id);
+              setQueuePosition(pos);
+              setStep("status");
+              setIsLoading(false);
+              return;
+            }
+          }
+        } catch (err) {
+          // fallthrough to show rate limit message
+        }
+      }
+
       setError(json.error || "Failed to create ride request");
       setIsLoading(false);
       return;
