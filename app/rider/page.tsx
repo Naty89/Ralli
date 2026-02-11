@@ -133,10 +133,11 @@ function RiderContent() {
       let cid = localStorage.getItem("ralli_client_id");
       if (!cid) {
         // Prefer browser crypto.randomUUID when available
-        cid = (typeof crypto !== "undefined" && (crypto as any).randomUUID)
+        const newCid = (typeof crypto !== "undefined" && (crypto as any).randomUUID)
           ? (crypto as any).randomUUID()
           : `c_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-        localStorage.setItem("ralli_client_id", cid);
+        localStorage.setItem("ralli_client_id", newCid);
+        cid = newCid;
       }
       setClientId(cid);
     } catch (err) {
