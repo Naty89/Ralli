@@ -59,13 +59,20 @@ export async function POST(request: Request) {
 
     const ip = getIp(request);
     const ua = request.headers.get("user-agent") || "";
-    // Prefer normalized phone for stable identification
+    // Prefer normalized phone for stable identification, then client_id, then fallback
     const rawPhone = rider_phone || null;
     const normalizedPhone = rawPhone ? rawPhone.replace(/\D/g, "") : null;
     const phoneForId = normalizedPhone && normalizedPhone.length >= 10 ? normalizedPhone : null;
-    const identifier = phoneForId
-      ? nodeCrypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex")
-      : generateRiderIdentifier(event_id, rider_name, ip, ua);
+    const clientId = body.client_id || null;
+
+    let identifier: string;
+    if (phoneForId) {
+      identifier = nodeCrypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex");
+    } else if (clientId) {
+      identifier = nodeCrypto.createHash("sha256").update(`${event_id}:${clientId}`).digest("hex");
+    } else {
+      identifier = generateRiderIdentifier(event_id, rider_name, ip, ua);
+    }
 
     // Rate limit check
     const rate = await checkAndUpdateRateLimit(event_id, identifier);

@@ -64,6 +64,7 @@ function RiderContent() {
   const [showTOSModal, setShowTOSModal] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
   const [riderHash, setRiderHash] = useState("");
+  const [clientId, setClientId] = useState<string | null>(null);
   const [cooldownStatus, setCooldownStatus] = useState<CooldownStatus | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -123,6 +124,23 @@ function RiderContent() {
           console.log("Location access denied:", err);
         }
       );
+    }
+  }, []);
+
+  // Ensure a persistent client id in localStorage for stable identification when phone isn't available
+  useEffect(() => {
+    try {
+      let cid = localStorage.getItem("ralli_client_id");
+      if (!cid) {
+        // Prefer browser crypto.randomUUID when available
+        cid = (typeof crypto !== "undefined" && (crypto as any).randomUUID)
+          ? (crypto as any).randomUUID()
+          : `c_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+        localStorage.setItem("ralli_client_id", cid);
+      }
+      setClientId(cid);
+    } catch (err) {
+      // ignore storage errors
     }
   }, []);
 
@@ -198,12 +216,13 @@ function RiderContent() {
 
     // Request server to generate stable rider identifier (uses IP + UA)
     try {
-      const resp = await fetch(
-        `/api/rides?event_id=${encodeURIComponent(event.id)}&rider_name=${encodeURIComponent(
-          riderName.trim()
-        )}`,
-        { method: "GET" }
-      );
+      const params = new URLSearchParams({
+        event_id: event.id,
+        rider_name: riderName.trim(),
+      });
+      if (clientId) params.set("client_id", clientId);
+
+      const resp = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
       const json = await resp.json();
       if (json) {
         const identifier = json.identifier || (json.data && json.data.rider_identifier_hash) || null;
@@ -313,18 +332,21 @@ function RiderContent() {
     const lng = pickupLng || -74.006;
 
     // Call server API to create ride idempotently
+    const payload: any = {
+      event_id: event!.id,
+      rider_name: riderName,
+      rider_phone: riderPhone.trim(),
+      pickup_address: pickupAddress,
+      pickup_lat: lat,
+      pickup_lng: lng,
+      passenger_count: passengerCount,
+    };
+    if (clientId) payload.client_id = clientId;
+
     const resp = await fetch(`/api/rides`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event_id: event!.id,
-        rider_name: riderName,
-        rider_phone: riderPhone.trim(),
-        pickup_address: pickupAddress,
-        pickup_lat: lat,
-        pickup_lng: lng,
-        passenger_count: passengerCount,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const json = await resp.json();
