@@ -54,6 +54,13 @@ export async function getExistingActiveRide(
 export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: string) {
   const admin = createAdminClient();
   const TEN_MINUTES = 10 * 60; // seconds
+  // If an active ride already exists for this identifier, allow operations
+  try {
+    const existing = await getExistingActiveRide(eventId, riderIdentifier);
+    if (existing) return { allowed: true };
+  } catch (e) {
+    // ignore errors from existence check and continue with rate limiting
+  }
   // Fetch existing record
   const { data: existing, error: selErr } = await admin
     .from("rider_rate_limits")
