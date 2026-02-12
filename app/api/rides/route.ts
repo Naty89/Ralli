@@ -23,15 +23,28 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const eventId = url.searchParams.get("event_id");
   const riderName = url.searchParams.get("rider_name") || "";
+  const rawPhoneParam = url.searchParams.get("rider_phone") || null;
+  const clientIdParam = url.searchParams.get("client_id") || null;
 
   if (!eventId) return NextResponse.json({ error: "event_id required" }, { status: 400 });
 
   const ip = getIp(request);
   const ua = request.headers.get("user-agent") || "";
-  const identifier = generateRiderIdentifier(eventId, riderName, ip, ua);
+
+  // Prefer normalized phone, then client_id, then fallback to generated identifier
+  const normalizedPhone = rawPhoneParam ? rawPhoneParam.replace(/\D/g, "") : null;
+  const phoneForId = normalizedPhone && normalizedPhone.length >= 10 ? normalizedPhone : null;
+  let identifier: string;
+  if (phoneForId) {
+    identifier = nodeCrypto.createHash("sha256").update(`${eventId}:${phoneForId}`).digest("hex");
+  } else if (clientIdParam) {
+    identifier = nodeCrypto.createHash("sha256").update(`${eventId}:${clientIdParam}`).digest("hex");
+  } else {
+    identifier = generateRiderIdentifier(eventId, riderName, ip, ua);
+  }
 
   try {
-    const existing = await getExistingActiveRide(eventId, identifier);
+    const existing = await getExistingActiveRide(eventId, identifier, phoneForId);
     // Return both identifier (always) and any existing active ride
     return NextResponse.json({ data: existing || null, identifier });
   } catch (err) {
