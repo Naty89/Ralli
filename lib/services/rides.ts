@@ -57,6 +57,11 @@ export async function createRideRequest(
   if (input.rider_identifier_hash) {
     insertData.rider_identifier_hash = input.rider_identifier_hash;
   }
+  // Normalize phone for easier matching
+  if (input.rider_phone) {
+    const digits = (input.rider_phone || "").replace(/\D/g, "");
+    if (digits.length >= 10) insertData.rider_phone_normalized = digits;
+  }
 
   const { data, error } = await supabase
     .from("ride_requests")

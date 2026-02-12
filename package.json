@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:integration": "node scripts/integration/rides-idempotency-test.js"
   },
   "dependencies": {
     "@googlemaps/js-api-loader": "^1.16.6",

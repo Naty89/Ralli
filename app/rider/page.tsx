@@ -28,19 +28,10 @@ import { EmergencyButton } from "@/components/EmergencyButton";
 import { CooldownNotice } from "@/components/CooldownNotice";
 import { BatchPosition } from "@/components/BatchPickupList";
 import { getEventByAccessCode } from "@/lib/services/events";
-import {
-  createRideRequest,
-  getRideRequestById,
-  getQueuePosition,
-  subscribeToRideRequest,
-} from "@/lib/services/rides";
+import { getRideRequestById, getQueuePosition, subscribeToRideRequest } from "@/lib/services/rides";
 import { subscribeToDriver } from "@/lib/services/drivers";
 import { formatETA } from "@/lib/services/etaService";
-import {
-  generateRiderIdentifierHash,
-  checkConsent,
-  recordConsent,
-} from "@/lib/services/consentService";
+import { checkConsent, recordConsent } from "@/lib/services/consentService";
 import { getCooldownStatus, confirmRiderPresence } from "@/lib/services/safetyService";
 import { triggerEmergency } from "@/lib/services/emergencyService";
 import { getRideBatchPosition } from "@/lib/services/batchService";
@@ -73,6 +64,7 @@ function RiderContent() {
   const [showTOSModal, setShowTOSModal] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
   const [riderHash, setRiderHash] = useState("");
+  const [clientId, setClientId] = useState<string | null>(null);
   const [cooldownStatus, setCooldownStatus] = useState<CooldownStatus | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -92,6 +84,32 @@ function RiderContent() {
     }
   }, []);
 
+  // Client-side rehydration: check localStorage for existing ride id
+  useEffect(() => {
+    const tryRehydrate = async () => {
+      try {
+        const stored = localStorage.getItem("ralli_ride_id");
+        if (!stored) return;
+        const { data, error } = await getRideRequestById(stored);
+        if (error || !data) {
+          localStorage.removeItem("ralli_ride_id");
+          return;
+        }
+        // If ride is still active, set and show status
+        if (["waiting", "assigned", "arrived", "in_progress"].includes(data.status)) {
+          setRideRequest(data);
+          setStep("status");
+        } else {
+          localStorage.removeItem("ralli_ride_id");
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    tryRehydrate();
+  }, []);
+
   // Get user location for emergency reporting
   useEffect(() => {
     if (navigator.geolocation) {
@@ -106,6 +124,24 @@ function RiderContent() {
           console.log("Location access denied:", err);
         }
       );
+    }
+  }, []);
+
+  // Ensure a persistent client id in localStorage for stable identification when phone isn't available
+  useEffect(() => {
+    try {
+      let cid = localStorage.getItem("ralli_client_id");
+      if (!cid) {
+        // Prefer browser crypto.randomUUID when available
+        const newCid = (typeof crypto !== "undefined" && (crypto as any).randomUUID)
+          ? (crypto as any).randomUUID()
+          : `c_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+        localStorage.setItem("ralli_client_id", newCid);
+        cid = newCid;
+      }
+      setClientId(cid);
+    } catch (err) {
+      // ignore storage errors
     }
   }, []);
 
@@ -179,21 +215,33 @@ function RiderContent() {
   const checkRiderStatus = useCallback(async () => {
     if (!event || !riderName.trim()) return;
 
-    // Generate hash (using placeholder IP for now - in production, get from API)
-    const hash = await generateRiderIdentifierHash(
-      event.id,
-      riderName.trim(),
-      "client-ip" // In production, fetch actual IP from an API route
-    );
-    setRiderHash(hash);
+    // Request server to generate stable rider identifier (uses IP + UA)
+    try {
+      const params = new URLSearchParams({
+        event_id: event.id,
+        rider_name: riderName.trim(),
+      });
+      if (clientId) params.set("client_id", clientId);
 
-    // Check consent
-    const { hasConsent: consent } = await checkConsent(event.id, hash);
-    setHasConsent(consent);
+      const resp = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
+      const json = await resp.json();
+      if (json) {
+        const identifier = json.identifier || (json.data && json.data.rider_identifier_hash) || null;
+        if (identifier) {
+          setRiderHash(identifier);
 
-    // Check cooldown
-    const { data: cooldown } = await getCooldownStatus(event.id, hash);
-    setCooldownStatus(cooldown);
+          // Check consent
+          const { hasConsent: consent } = await checkConsent(event.id, identifier);
+          setHasConsent(consent);
+
+          // Check cooldown
+          const { data: cooldown } = await getCooldownStatus(event.id, identifier);
+          setCooldownStatus(cooldown);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to identify rider:", err);
+    }
   }, [event, riderName]);
 
   useEffect(() => {
@@ -276,6 +324,7 @@ function RiderContent() {
       return;
     }
 
+
     setIsLoading(true);
     setError("");
 
@@ -283,7 +332,8 @@ function RiderContent() {
     const lat = pickupLat || 40.7128;
     const lng = pickupLng || -74.006;
 
-    const { data, error: createError } = await createRideRequest({
+    // Call server API to create ride idempotently
+    const payload: any = {
       event_id: event!.id,
       rider_name: riderName,
       rider_phone: riderPhone.trim(),
@@ -291,17 +341,55 @@ function RiderContent() {
       pickup_lat: lat,
       pickup_lng: lng,
       passenger_count: passengerCount,
-      rider_identifier_hash: riderHash,
+    };
+    if (clientId) payload.client_id = clientId;
+
+    const resp = await fetch(`/api/rides`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
-    if (createError || !data) {
-      setError(createError?.message || "Failed to create ride request");
+    const json = await resp.json();
+    if (!resp.ok || json.error) {
+      // If rate limited, attempt to fetch existing ride by identifier/client_id
+      if (resp.status === 429) {
+        try {
+          const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
+          if (clientId) params.set("client_id", clientId);
+          const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
+          const checkJson = await check.json();
+          if (check.ok && checkJson && (checkJson.data || checkJson.identifier)) {
+            const existing = checkJson.data || null;
+            if (existing) {
+              setRideRequest(existing as RideRequest);
+              try { localStorage.setItem("ralli_ride_id", existing.id); } catch {}
+              const pos = await getQueuePosition(existing.id, event!.id);
+              setQueuePosition(pos);
+              setStep("status");
+              setIsLoading(false);
+              return;
+            }
+          }
+        } catch (err) {
+          // fallthrough to show rate limit message
+        }
+      }
+
+      setError(json.error || "Failed to create ride request");
       setIsLoading(false);
       return;
     }
 
-    setRideRequest(data);
+    const data = json.data;
+
+    setRideRequest(data as RideRequest);
     setError(""); // Clear any prior error
+
+    // Store ride id for client-side rehydration
+    try {
+      localStorage.setItem("ralli_ride_id", data.id);
+    } catch {}
 
     // Get initial queue position
     const pos = await getQueuePosition(data.id, event!.id);
