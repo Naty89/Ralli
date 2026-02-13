@@ -86,14 +86,17 @@ export async function POST(request: Request) {
 
     // Step 2: Check for existing active ride by phone_normalized
     if (phoneForId) {
+      console.log(`[Ride API] Checking for existing ride by phone: ${phoneForId}`);
       const existingByPhone = await getExistingActiveRide(event_id, null, phoneForId);
       if (existingByPhone) {
+        console.log(`[Ride API] Found existing ride by phone: ${existingByPhone.id}`);
         return NextResponse.json({
           data: existingByPhone,
           isExisting: true,
           message: "You already have an active ride in the queue. Would you like to edit it?",
         });
       }
+      console.log(`[Ride API] No existing ride found by phone: ${phoneForId}`);
     }
 
     // Step 3: Check for existing active ride by client_id

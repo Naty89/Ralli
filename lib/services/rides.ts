@@ -330,3 +330,21 @@ export async function autoAssignAllRides(
 
   return { assignedCount, error: null };
 }
+
+// Cancel a ride request
+export async function cancelRideRequest(
+  rideId: string
+): Promise<{ data: RideRequest | null; error: Error | null }> {
+  const { data, error } = await supabase
+    .from("ride_requests")
+    .update({ status: "cancelled" })
+    .eq("id", rideId)
+    .select()
+    .single();
+
+  if (error) {
+    return { data: null, error: new Error(error.message) };
+  }
+
+  return { data, error: null };
+}

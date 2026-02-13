@@ -28,7 +28,7 @@ import { EmergencyButton } from "@/components/EmergencyButton";
 import { CooldownNotice } from "@/components/CooldownNotice";
 import { BatchPosition } from "@/components/BatchPickupList";
 import { getEventByAccessCode } from "@/lib/services/events";
-import { getRideRequestById, getQueuePosition, subscribeToRideRequest } from "@/lib/services/rides";
+import { getRideRequestById, getQueuePosition, subscribeToRideRequest, cancelRideRequest } from "@/lib/services/rides";
 import { subscribeToDriver } from "@/lib/services/drivers";
 import { formatETA } from "@/lib/services/etaService";
 import { checkConsent, recordConsent } from "@/lib/services/consentService";
@@ -106,7 +106,14 @@ function RiderContent() {
         // If ride is still active, set and show status
         if (["waiting", "assigned", "arrived", "in_progress"].includes(data.status)) {
           setRideRequest(data);
+          setEvent(data.event ? data.event : null);
           setStep("status");
+
+          // Fetch queue position if ride is waiting
+          if (data.status === "waiting" && data.event_id) {
+            const pos = await getQueuePosition(data.id, data.event_id);
+            setQueuePosition(pos);
+          }
         } else {
           localStorage.removeItem("ralli_ride_id");
         }
@@ -304,6 +311,32 @@ function RiderContent() {
       userLocation?.lat,
       userLocation?.lng
     );
+  };
+
+  // Handle cancel ride
+  const handleCancelRide = async () => {
+    if (!rideRequest) return;
+
+    if (!window.confirm("Are you sure you want to cancel this ride?")) {
+      return;
+    }
+
+    setIsConfirming(true);
+    const { data, error } = await cancelRideRequest(rideRequest.id);
+
+    if (error) {
+      setError("Failed to cancel ride");
+      console.error("Cancel ride error:", error);
+    } else if (data) {
+      // Clear the ride from state and localStorage
+      setRideRequest(null);
+      setQueuePosition({ position: 0, total: 0 });
+      try {
+        localStorage.removeItem("ralli_ride_id");
+      } catch {}
+      setStep("form");
+    }
+    setIsConfirming(false);
   };
 
   // Handle "View Existing Ride" - show current ride status
@@ -925,6 +958,20 @@ function RiderContent() {
                   </div>
                 )}
               </div>
+
+              {/* Cancel Ride Button - show for cancellable statuses */}
+              {rideRequest && ["waiting", "assigned", "arrived"].includes(rideRequest.status) && (
+                <div className="border-t border-dark-800 pt-4">
+                  <Button
+                    variant="ghost"
+                    className="w-full text-red-400 hover:text-red-300"
+                    onClick={handleCancelRide}
+                    isLoading={isConfirming}
+                  >
+                    Cancel Ride
+                  </Button>
+                </div>
+              )}
             )}
           </CardContent>
         </Card>
