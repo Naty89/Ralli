@@ -173,16 +173,20 @@ export async function autoAssignNextRide(
   }
 
   // Create all batch items in one call
+  console.log(`[Batch Mode] Preparing to create ${batchItemsToCreate.length} batch items:`, batchItemsToCreate);
   if (batchItemsToCreate.length > 0) {
-    const { error: itemsError } = await admin
+    const { data: insertedItems, error: itemsError } = await admin
       .from("ride_batch_items")
-      .insert(batchItemsToCreate);
+      .insert(batchItemsToCreate)
+      .select();
 
     if (itemsError) {
-      console.error(`[Batch Mode] Error creating batch items:`, itemsError);
+      console.error(`[Batch Mode] Error creating batch items:`, itemsError.message, itemsError);
     } else {
-      console.log(`[Batch Mode] Created ${batchItemsToCreate.length} batch items`);
+      console.log(`[Batch Mode] Successfully created ${batchItemsToCreate.length} batch items:`, insertedItems);
     }
+  } else {
+    console.warn(`[Batch Mode] WARNING: No batch items to create! batchItemsToCreate is empty`);
   }
 
   // Update driver status
