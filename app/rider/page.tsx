@@ -446,6 +446,21 @@ function RiderContent() {
         return;
       }
 
+      // Check if requests are open (event starts in 15 mins or already started)
+      if (event?.start_time) {
+        const now = new Date();
+        const eventStart = new Date(event.start_time);
+        const requestsOpenTime = new Date(eventStart.getTime() - 15 * 60000); // 15 mins before start
+
+        if (now < requestsOpenTime) {
+          const timeUntilOpen = Math.ceil((requestsOpenTime.getTime() - now.getTime()) / 60000);
+          const eventStartStr = eventStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const requestsOpenStr = requestsOpenTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setError(`Event starts at ${eventStartStr}. Ride requests open at ${requestsOpenStr} (${timeUntilOpen} minutes from now).`);
+          return;
+        }
+      }
+
       setIsLoading(true);
       setError("");
 

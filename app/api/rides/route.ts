@@ -76,6 +76,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "event_id and rider_name required" }, { status: 400 });
     }
 
+    // Check if event exists and if requests are open (15 mins before start time)
+    const admin = createAdminClient();
+    const { data: event, error: eventError } = await admin
+      .from("events")
+      .select("start_time")
+      .eq("id", event_id)
+      .single();
+
+    if (eventError || !event) {
+      return NextResponse.json({ error: "Event not found" }, { status: 404 });
+    }
+
+    // Validate that requests are open (event starts in 15 mins or already started)
+    if (event.start_time) {
+      const now = new Date();
+      const eventStart = new Date(event.start_time);
+      const requestsOpenTime = new Date(eventStart.getTime() - 15 * 60000); // 15 mins before start
+
+      if (now < requestsOpenTime) {
+        const eventStartStr = eventStart.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const requestsOpenStr = requestsOpenTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return NextResponse.json(
+          { error: `Event starts at ${eventStartStr}. Ride requests open at ${requestsOpenStr}.` },
+          { status: 403 }
+        );
+      }
+    }
+
     const ip = getIp(request);
     const ua = request.headers.get("user-agent") || "";
     const rawPhone = rider_phone || null;
@@ -149,8 +177,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Insert new ride using admin client
-    const admin = createAdminClient();
+    // Insert new ride using admin client (already created above)
     const insert = {
       event_id,
       rider_name,
