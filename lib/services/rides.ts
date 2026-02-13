@@ -330,3 +330,30 @@ export async function autoAssignAllRides(
 
   return { assignedCount, error: null };
 }
+
+// Update an existing ride (for editing before driver arrives)
+export async function updateRideRequest(
+  rideId: string,
+  updates: {
+    pickup_address?: string;
+    pickup_lat?: number;
+    pickup_lng?: number;
+    passenger_count?: number;
+    dropoff_address?: string;
+    dropoff_lat?: number;
+    dropoff_lng?: number;
+  }
+): Promise<{ data: RideRequest | null; error: Error | null }> {
+  const { data, error } = await supabase
+    .from("ride_requests")
+    .update(updates)
+    .eq("id", rideId)
+    .select()
+    .single();
+
+  if (error) {
+    return { data: null, error: new Error(error.message) };
+  }
+
+  return { data, error: null };
+}

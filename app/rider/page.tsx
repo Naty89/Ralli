@@ -28,7 +28,7 @@ import { EmergencyButton } from "@/components/EmergencyButton";
 import { CooldownNotice } from "@/components/CooldownNotice";
 import { BatchPosition } from "@/components/BatchPickupList";
 import { getEventByAccessCode } from "@/lib/services/events";
-import { getRideRequestById, getQueuePosition, subscribeToRideRequest, cancelRideRequest } from "@/lib/services/rides";
+import { getRideRequestById, getQueuePosition, subscribeToRideRequest, cancelRideRequest, updateRideRequest } from "@/lib/services/rides";
 import { subscribeToDriver } from "@/lib/services/drivers";
 import { formatETA } from "@/lib/services/etaService";
 import { checkConsent, recordConsent } from "@/lib/services/consentService";
@@ -84,6 +84,7 @@ function RiderContent() {
   // Existing ride modal state
   const [showExistingRideModal, setShowExistingRideModal] = useState(false);
   const [existingRideData, setExistingRideData] = useState<RideRequest | null>(null);
+  const [isEditingRide, setIsEditingRide] = useState(false);
 
   // Check initial code
   useEffect(() => {
@@ -338,6 +339,27 @@ function RiderContent() {
     setIsConfirming(false);
   };
 
+  // Handle edit ride
+  const handleEditRide = () => {
+    if (!rideRequest) return;
+
+    // Pre-fill form with current ride data
+    setRiderName(rideRequest.rider_name);
+    setRiderPhone(rideRequest.rider_phone || "");
+    setPickupAddress(rideRequest.pickup_address);
+    setPickupLat(rideRequest.pickup_lat);
+    setPickupLng(rideRequest.pickup_lng);
+    setPassengerCount(rideRequest.passenger_count);
+    if (rideRequest.dropoff_address) {
+      setDropoffAddress(rideRequest.dropoff_address);
+      setDropoffLat(rideRequest.dropoff_lat || 0);
+      setDropoffLng(rideRequest.dropoff_lng || 0);
+    }
+
+    setIsEditingRide(true);
+    setStep("form");
+  };
+
   // Handle "View Existing Ride" - show current ride status
   const handleViewExistingRide = async () => {
     if (!existingRideData) return;
@@ -430,6 +452,35 @@ function RiderContent() {
     // For MVP, use a default location if geocoding not set up
     const lat = pickupLat || 40.7128;
     const lng = pickupLng || -74.006;
+
+    // If editing an existing ride, update it instead of creating new
+    if (isEditingRide && rideRequest) {
+      const { data, error } = await updateRideRequest(rideRequest.id, {
+        pickup_address: pickupAddress,
+        pickup_lat: lat,
+        pickup_lng: lng,
+        passenger_count: passengerCount,
+        ...(event?.event_address && dropoffAddress && {
+          dropoff_address: dropoffAddress,
+          dropoff_lat: dropoffLat,
+          dropoff_lng: dropoffLng,
+        }),
+      });
+
+      if (error) {
+        setError("Failed to update ride");
+        setIsLoading(false);
+        return;
+      }
+
+      if (data) {
+        setRideRequest(data);
+        setIsEditingRide(false);
+        setStep("status");
+        setIsLoading(false);
+      }
+      return;
+    }
 
     // Call server API to create ride idempotently
     const payload: any = {
@@ -605,7 +656,10 @@ function RiderContent() {
       <div className="min-h-screen bg-dark-950 py-8 px-4">
         <div className="max-w-md mx-auto">
           <button
-            onClick={() => setStep("code")}
+            onClick={() => {
+              setStep(isEditingRide ? "status" : "code");
+              setIsEditingRide(false);
+            }}
             className="flex items-center gap-2 text-dark-400 hover:text-dark-200 mb-6"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -786,7 +840,7 @@ function RiderContent() {
                   isLoading={isLoading}
                   disabled={cooldownStatus?.is_in_cooldown}
                 >
-                  Request Ride
+                  {isEditingRide ? "Update Ride" : "Request Ride"}
                 </Button>
               </form>
             </CardContent>
@@ -987,6 +1041,19 @@ function RiderContent() {
                   <div className="flex items-center gap-3 text-primary-400">
                     <Car className="h-5 w-5" />
                     <span>Driver: {rideRequest.driver.profile.full_name}</span>
+                  </div>
+                )}
+
+                {/* Edit Ride Button - show only if driver hasn't started */}
+                {["waiting", "assigned"].includes(rideRequest.status) && (
+                  <div className="border-t border-dark-800 pt-3">
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={handleEditRide}
+                    >
+                      Edit Ride
+                    </Button>
                   </div>
                 )}
 
