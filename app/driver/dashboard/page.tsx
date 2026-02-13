@@ -145,9 +145,11 @@ export default function DriverDashboardPage() {
 
     const { data: rideData } = await getDriverCurrentRide(id);
     setCurrentRide(rideData);
+    console.log("[Driver Dashboard] Current ride:", rideData);
 
     // Load batch data if driver is assigned
     const { data: batchData } = await getDriverActiveBatch(id);
+    console.log("[Driver Dashboard] Active batch:", batchData);
     setActiveBatch(batchData);
 
     // Calculate current pickup index
@@ -157,6 +159,7 @@ export default function DriverDashboardPage() {
       );
       const firstPending = sortedItems.findIndex((item) => !item.picked_up);
       setCurrentPickupIndex(firstPending >= 0 ? firstPending : sortedItems.length);
+      console.log("[Driver Dashboard] Batch items count:", batchData.items.length);
     }
   };
 
