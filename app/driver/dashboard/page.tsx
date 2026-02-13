@@ -12,6 +12,7 @@ import {
   Power,
   Clock,
   Phone,
+  MapPinned,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
@@ -405,13 +406,24 @@ export default function DriverDashboardPage() {
               </div>
 
               {/* Pickup Address */}
-              <div>
-                <p className="text-sm text-dark-400">Pickup Location</p>
-                <div className="flex items-start gap-2 mt-1">
-                  <MapPin className="h-5 w-5 text-primary-400 shrink-0" />
-                  <p className="font-medium">{currentRide.pickup_address}</p>
+              <div className="flex items-start gap-2">
+                <MapPin className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <div className="text-xs text-dark-400">Pickup</div>
+                  <div className="text-sm">{currentRide.pickup_address}</div>
                 </div>
               </div>
+
+              {/* Dropoff Location - if available */}
+              {currentRide.dropoff_address && (
+                <div className="flex items-start gap-2">
+                  <MapPinned className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-xs text-dark-400">Dropoff</div>
+                    <div className="text-sm">{currentRide.dropoff_address}</div>
+                  </div>
+                </div>
+              )}
 
               {/* Passenger Count */}
               <div className="flex items-center gap-2">

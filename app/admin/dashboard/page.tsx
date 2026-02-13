@@ -18,6 +18,7 @@ import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
 import { Badge } from "@/components/ui";
+import { PlacesAutocomplete } from "@/components/PlacesAutocomplete";
 import { getCurrentUser, signOut } from "@/lib/services/auth";
 import { getAdminEvents, createEvent, toggleEventActive } from "@/lib/services/events";
 import { Event, Profile } from "@/types/database";
@@ -254,6 +255,9 @@ function CreateEventModal({
   const [eventName, setEventName] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
+  const [eventAddress, setEventAddress] = useState("");
+  const [eventLat, setEventLat] = useState(0);
+  const [eventLng, setEventLng] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -262,15 +266,21 @@ function CreateEventModal({
     setIsLoading(true);
     setError("");
 
-    const { error } = await createEvent(
-      {
-        event_name: eventName,
-        fraternity_name: fraternityName,
-        start_time: new Date(startTime).toISOString(),
-        end_time: new Date(endTime).toISOString(),
-      },
-      userId
-    );
+    const input: any = {
+      event_name: eventName,
+      fraternity_name: fraternityName,
+      start_time: new Date(startTime).toISOString(),
+      end_time: new Date(endTime).toISOString(),
+    };
+
+    // Include event location if provided
+    if (eventAddress && eventLat && eventLng) {
+      input.event_address = eventAddress;
+      input.event_lat = eventLat;
+      input.event_lng = eventLng;
+    }
+
+    const { error } = await createEvent(input, userId);
 
     if (error) {
       setError(error.message);
@@ -308,6 +318,25 @@ function CreateEventModal({
             onChange={(e) => setEndTime(e.target.value)}
             required
           />
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Event Location (Optional)
+            </label>
+            <PlacesAutocomplete
+              value={eventAddress}
+              onChange={setEventAddress}
+              onPlaceSelect={(place) => {
+                setEventAddress(place.address);
+                setEventLat(place.lat);
+                setEventLng(place.lng);
+              }}
+              placeholder="Enter event address"
+            />
+            <p className="text-xs text-dark-500 mt-1">
+              Adding an event location enables directional rides (to/from event)
+            </p>
+          </div>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 

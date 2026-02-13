@@ -56,6 +56,10 @@ function RiderContent() {
   const [pickupLat, setPickupLat] = useState(0);
   const [pickupLng, setPickupLng] = useState(0);
   const [passengerCount, setPassengerCount] = useState(1);
+  const [rideDirection, setRideDirection] = useState<"to_event" | "from_event">("to_event");
+  const [dropoffAddress, setDropoffAddress] = useState("");
+  const [dropoffLat, setDropoffLat] = useState(0);
+  const [dropoffLng, setDropoffLng] = useState(0);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -211,6 +215,15 @@ function RiderContent() {
     }
 
     setEvent(data);
+
+    // If event has location, pre-fill dropoff and set default direction to "to_event"
+    if (data.event_address && data.event_lat && data.event_lng) {
+      setDropoffAddress(data.event_address);
+      setDropoffLat(data.event_lat);
+      setDropoffLng(data.event_lng);
+      setRideDirection("to_event");
+    }
+
     setStep("form");
     setIsLoading(false);
   };
@@ -350,6 +363,12 @@ function RiderContent() {
       return;
     }
 
+    // If event has location, validate dropoff address
+    if (event?.event_address && !dropoffAddress.trim()) {
+      setError("Please enter a dropoff address");
+      return;
+    }
+
     if (!riderPhone.trim()) {
       setError("Phone number is required");
       return;
@@ -390,6 +409,15 @@ function RiderContent() {
       pickup_lng: lng,
       passenger_count: passengerCount,
     };
+
+    // Add direction and dropoff if event has location
+    if (event?.event_address && dropoffAddress) {
+      payload.ride_direction = rideDirection;
+      payload.dropoff_address = dropoffAddress;
+      payload.dropoff_lat = dropoffLat;
+      payload.dropoff_lng = dropoffLng;
+    }
+
     if (clientId) payload.client_id = clientId;
 
     const resp = await fetch(`/api/rides`, {
@@ -549,17 +577,112 @@ function RiderContent() {
                   required
                 />
 
-                <PlacesAutocomplete
-                  label="Pickup Address"
-                  value={pickupAddress}
-                  onChange={setPickupAddress}
-                  onPlaceSelect={(place) => {
-                    setPickupAddress(place.address);
-                    setPickupLat(place.lat);
-                    setPickupLng(place.lng);
-                  }}
-                  placeholder="Start typing an address..."
-                />
+                {/* Ride Direction Selector - show if event has location */}
+                {event?.event_address && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium">Ride Direction</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRideDirection("to_event");
+                          // Auto-fill dropoff with event location
+                          setDropoffAddress(event.event_address!);
+                          setDropoffLat(event.event_lat!);
+                          setDropoffLng(event.event_lng!);
+                          // Clear pickup for user to enter
+                          setPickupAddress("");
+                          setPickupLat(0);
+                          setPickupLng(0);
+                        }}
+                        className={`p-3 rounded-lg border ${
+                          rideDirection === "to_event"
+                            ? "border-primary-500 bg-primary-900/30"
+                            : "border-dark-700"
+                        }`}
+                      >
+                        <div className="text-sm font-medium">To Event</div>
+                        <div className="text-xs text-dark-400">Pick me up → Event</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRideDirection("from_event");
+                          // Auto-fill pickup with event location
+                          setPickupAddress(event.event_address!);
+                          setPickupLat(event.event_lat!);
+                          setPickupLng(event.event_lng!);
+                          // Clear dropoff for user to enter
+                          setDropoffAddress("");
+                          setDropoffLat(0);
+                          setDropoffLng(0);
+                        }}
+                        className={`p-3 rounded-lg border ${
+                          rideDirection === "from_event"
+                            ? "border-primary-500 bg-primary-900/30"
+                            : "border-dark-700"
+                        }`}
+                      >
+                        <div className="text-sm font-medium">From Event</div>
+                        <div className="text-xs text-dark-400">Event → Drop me off</div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pickup Address - editable if to_event OR no event location */}
+                <div>
+                  <label className="block text-sm font-medium text-dark-300 mb-1">
+                    {event?.event_address && rideDirection === "from_event"
+                      ? "Pickup Location (Event)"
+                      : "Pickup Address"}
+                  </label>
+                  {event?.event_address && rideDirection === "from_event" ? (
+                    <div className="p-3 bg-dark-800 rounded-lg border border-dark-700 text-dark-400 text-sm">
+                      <MapPin className="h-4 w-4 inline mr-2" />
+                      {pickupAddress}
+                    </div>
+                  ) : (
+                    <PlacesAutocomplete
+                      value={pickupAddress}
+                      onChange={setPickupAddress}
+                      onPlaceSelect={(place) => {
+                        setPickupAddress(place.address);
+                        setPickupLat(place.lat);
+                        setPickupLng(place.lng);
+                      }}
+                      placeholder="Start typing an address..."
+                    />
+                  )}
+                </div>
+
+                {/* Dropoff Address - show if event has location */}
+                {event?.event_address && (
+                  <div>
+                    <label className="block text-sm font-medium text-dark-300 mb-1">
+                      {rideDirection === "to_event"
+                        ? "Dropoff Location (Event)"
+                        : "Dropoff Address"}
+                    </label>
+                    {rideDirection === "to_event" ? (
+                      <div className="p-3 bg-dark-800 rounded-lg border border-dark-700 text-dark-400 text-sm">
+                        <MapPin className="h-4 w-4 inline mr-2" />
+                        {dropoffAddress}
+                      </div>
+                    ) : (
+                      <PlacesAutocomplete
+                        value={dropoffAddress}
+                        onChange={setDropoffAddress}
+                        onPlaceSelect={(place) => {
+                          setDropoffAddress(place.address);
+                          setDropoffLat(place.lat);
+                          setDropoffLng(place.lng);
+                        }}
+                        placeholder="Start typing an address..."
+                      />
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-dark-300 mb-1">
@@ -773,9 +896,21 @@ function RiderContent() {
                   <span>{rideRequest.passenger_count} passenger(s)</span>
                 </div>
                 <div className="flex items-start gap-3">
-                  <MapPin className="h-5 w-5 text-dark-500 shrink-0" />
-                  <span>{rideRequest.pickup_address}</span>
+                  <MapPin className="h-5 w-5 text-blue-500 shrink-0" />
+                  <div>
+                    <div className="text-xs text-dark-400">Pickup</div>
+                    <span>{rideRequest.pickup_address}</span>
+                  </div>
                 </div>
+                {rideRequest.dropoff_address && (
+                  <div className="flex items-start gap-3">
+                    <MapPinned className="h-5 w-5 text-green-500 shrink-0" />
+                    <div>
+                      <div className="text-xs text-dark-400">Dropoff</div>
+                      <span>{rideRequest.dropoff_address}</span>
+                    </div>
+                  </div>
+                )}
                 {rideRequest?.driver?.profile && (
                   <div className="flex items-center gap-3 text-primary-400">
                     <Car className="h-5 w-5" />

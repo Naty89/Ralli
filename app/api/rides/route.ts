@@ -65,6 +65,10 @@ export async function POST(request: Request) {
       pickup_lat,
       pickup_lng,
       passenger_count,
+      ride_direction,
+      dropoff_address,
+      dropoff_lat,
+      dropoff_lng,
     } = body;
 
     if (!event_id || !rider_name) {
@@ -155,6 +159,10 @@ export async function POST(request: Request) {
       status: "waiting",
       rider_confirmed: false,
       rider_identifier_hash: identifier,
+      ride_direction: ride_direction || null,
+      dropoff_address: dropoff_address || null,
+      dropoff_lat: dropoff_lat || null,
+      dropoff_lng: dropoff_lng || null,
     } as any;
 
     const { data, error } = await admin.from("ride_requests").insert(insert).select().single();

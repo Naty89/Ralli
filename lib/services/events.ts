@@ -18,17 +18,26 @@ export async function createEvent(
 ): Promise<{ data: Event | null; error: Error | null }> {
   const accessCode = generateAccessCode();
 
+  const insertData: any = {
+    event_name: input.event_name,
+    fraternity_name: input.fraternity_name,
+    start_time: input.start_time,
+    end_time: input.end_time,
+    access_code: accessCode,
+    created_by: createdBy,
+    is_active: true,
+  };
+
+  // Include event location if provided
+  if (input.event_address && input.event_lat && input.event_lng) {
+    insertData.event_address = input.event_address;
+    insertData.event_lat = input.event_lat;
+    insertData.event_lng = input.event_lng;
+  }
+
   const { data, error } = await supabase
     .from("events")
-    .insert({
-      event_name: input.event_name,
-      fraternity_name: input.fraternity_name,
-      start_time: input.start_time,
-      end_time: input.end_time,
-      access_code: accessCode,
-      created_by: createdBy,
-      is_active: true,
-    })
+    .insert(insertData)
     .select()
     .single();
 

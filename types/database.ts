@@ -4,6 +4,8 @@ export type UserRole = "admin" | "driver";
 
 export type DriverStatus = "offline" | "available" | "assigned";
 
+export type RideDirection = "to_event" | "from_event";
+
 export type RideStatus =
   | "waiting"
   | "assigned"
@@ -51,6 +53,9 @@ export interface Event {
   created_by: string;
   admin_email?: string;
   batch_mode_enabled: boolean;
+  event_address?: string;
+  event_lat?: number;
+  event_lng?: number;
   created_at: string;
   updated_at: string;
 }
@@ -94,6 +99,10 @@ export interface RideRequest {
   rider_identifier_hash?: string;
   batch_id?: string;
   pickup_sequence_index?: number;
+  ride_direction?: RideDirection;
+  dropoff_address?: string;
+  dropoff_lat?: number;
+  dropoff_lng?: number;
   created_at: string;
   updated_at: string;
   // Joined fields
@@ -197,6 +206,9 @@ export interface CreateEventInput {
   fraternity_name: string;
   start_time: string;
   end_time: string;
+  event_address?: string;
+  event_lat?: number;
+  event_lng?: number;
 }
 
 export interface CreateRideRequestInput {
