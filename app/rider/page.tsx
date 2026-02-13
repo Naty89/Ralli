@@ -77,6 +77,10 @@ function RiderContent() {
     estimated_arrival: string | null;
   } | null>(null);
 
+  // Existing ride modal state
+  const [showExistingRideModal, setShowExistingRideModal] = useState(false);
+  const [existingRideData, setExistingRideData] = useState<RideRequest | null>(null);
+
   // Check initial code
   useEffect(() => {
     if (initialCode) {
@@ -289,6 +293,50 @@ function RiderContent() {
     );
   };
 
+  // Handle "View Existing Ride" - show current ride status
+  const handleViewExistingRide = async () => {
+    if (!existingRideData) return;
+
+    setRideRequest(existingRideData);
+    setShowExistingRideModal(false);
+    setError("");
+
+    // Store ride id for client-side rehydration
+    try {
+      localStorage.setItem("ralli_ride_id", existingRideData.id);
+    } catch {}
+
+    // Get initial queue position
+    if (event) {
+      const pos = await getQueuePosition(existingRideData.id, event.id);
+      setQueuePosition(pos);
+    }
+
+    setStep("status");
+  };
+
+  // Handle "Edit Existing Ride" - go back to form with existing data
+  const handleEditExistingRide = () => {
+    if (!existingRideData) return;
+
+    setRiderName(existingRideData.rider_name);
+    setRiderPhone(existingRideData.rider_phone || "");
+    setPickupAddress(existingRideData.pickup_address);
+    setPickupLat(existingRideData.pickup_lat);
+    setPickupLng(existingRideData.pickup_lng);
+    setPassengerCount(existingRideData.passenger_count);
+
+    setShowExistingRideModal(false);
+    setExistingRideData(null);
+    setError("");
+  };
+
+  // Handle "Cancel" - stay on form
+  const handleCancelExistingRide = () => {
+    setShowExistingRideModal(false);
+    setExistingRideData(null);
+  };
+
   const handleRideSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -351,6 +399,15 @@ function RiderContent() {
     });
 
     const json = await resp.json();
+
+    // Check if this is an existing ride (Option A implementation)
+    if (json.isExisting && json.data) {
+      setExistingRideData(json.data);
+      setShowExistingRideModal(true);
+      setIsLoading(false);
+      return;
+    }
+
     if (!resp.ok || json.error) {
       // If rate limited, attempt to fetch existing ride by identifier/client_id
       if (resp.status === 429) {
@@ -362,11 +419,8 @@ function RiderContent() {
           if (check.ok && checkJson && (checkJson.data || checkJson.identifier)) {
             const existing = checkJson.data || null;
             if (existing) {
-              setRideRequest(existing as RideRequest);
-              try { localStorage.setItem("ralli_ride_id", existing.id); } catch {}
-              const pos = await getQueuePosition(existing.id, event!.id);
-              setQueuePosition(pos);
-              setStep("status");
+              setExistingRideData(existing);
+              setShowExistingRideModal(true);
               setIsLoading(false);
               return;
             }
@@ -763,6 +817,64 @@ function RiderContent() {
         ["assigned", "arrived", "in_progress"].includes(rideRequest.status) && (
           <EmergencyButton onTrigger={handleEmergency} />
         )}
+
+      {/* Existing Ride Modal - Option A: Prompt user when duplicate detected */}
+      {showExistingRideModal && existingRideData && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-500">
+                <AlertTriangle className="h-5 w-5" />
+                Ride Already Exists
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-dark-300">
+                You already have an active ride in the queue. Would you like to view it or edit your request?
+              </p>
+
+              <div className="bg-dark-800 rounded-lg p-3 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-dark-400">Pickup Location:</span>
+                  <span className="text-dark-200">{existingRideData.pickup_address}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dark-400">Passengers:</span>
+                  <span className="text-dark-200">{existingRideData.passenger_count}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dark-400">Status:</span>
+                  <RideStatusBadge status={existingRideData.status} />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Button
+                  onClick={handleViewExistingRide}
+                  className="w-full"
+                  variant="primary"
+                >
+                  View Ride Status
+                </Button>
+                <Button
+                  onClick={handleEditExistingRide}
+                  className="w-full"
+                  variant="secondary"
+                >
+                  Edit Request
+                </Button>
+                <Button
+                  onClick={handleCancelExistingRide}
+                  className="w-full"
+                  variant="ghost"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

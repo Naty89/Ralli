@@ -84,7 +84,11 @@ export async function POST(request: Request) {
     if (phoneForId) {
       const existingByPhone = await getExistingActiveRide(event_id, null, phoneForId);
       if (existingByPhone) {
-        return NextResponse.json({ data: existingByPhone });
+        return NextResponse.json({
+          data: existingByPhone,
+          isExisting: true,
+          message: "You already have an active ride in the queue. Would you like to edit it?",
+        });
       }
     }
 
@@ -97,7 +101,11 @@ export async function POST(request: Request) {
         .digest("hex");
       const existingByClientId = await getExistingActiveRide(event_id, clientIdHash, null);
       if (existingByClientId) {
-        return NextResponse.json({ data: existingByClientId });
+        return NextResponse.json({
+          data: existingByClientId,
+          isExisting: true,
+          message: "You already have an active ride in the queue. Would you like to edit it?",
+        });
       }
     }
 
@@ -116,7 +124,11 @@ export async function POST(request: Request) {
 
     const existingByIdentifier = await getExistingActiveRide(event_id, identifier, null);
     if (existingByIdentifier) {
-      return NextResponse.json({ data: existingByIdentifier });
+      return NextResponse.json({
+        data: existingByIdentifier,
+        isExisting: true,
+        message: "You already have an active ride in the queue. Would you like to edit it?",
+      });
     }
 
     // Step 5: If found, return existing ride (200) - all checked above
@@ -150,12 +162,16 @@ export async function POST(request: Request) {
       // If unique constraint on active ride violated, return existing
       if (error.code === "23505") {
         const found = await getExistingActiveRide(event_id, identifier, phoneForId);
-        return NextResponse.json({ data: found || null });
+        return NextResponse.json({
+          data: found || null,
+          isExisting: true,
+          message: "You already have an active ride in the queue. Would you like to edit it?",
+        });
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ data });
+    return NextResponse.json({ data, isExisting: false });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
