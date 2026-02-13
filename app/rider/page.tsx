@@ -1044,8 +1044,8 @@ function RiderContent() {
                   </div>
                 )}
 
-                {/* Edit Ride Button - show only if driver hasn't started */}
-                {["waiting", "assigned"].includes(rideRequest.status) && (
+                {/* Edit Ride Button - only before driver assigned */}
+                {rideRequest.status === "waiting" && (
                   <div className="border-t border-dark-800 pt-3">
                     <Button
                       variant="secondary"
