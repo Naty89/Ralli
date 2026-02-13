@@ -106,7 +106,6 @@ function RiderContent() {
         // If ride is still active, set and show status
         if (["waiting", "assigned", "arrived", "in_progress"].includes(data.status)) {
           setRideRequest(data);
-          setEvent(data.event ? data.event : null);
           setStep("status");
 
           // Fetch queue position if ride is waiting
@@ -322,12 +321,12 @@ function RiderContent() {
     }
 
     setIsConfirming(true);
-    const { data, error } = await cancelRideRequest(rideRequest.id);
+    const { error } = await cancelRideRequest(rideRequest.id);
 
     if (error) {
       setError("Failed to cancel ride");
       console.error("Cancel ride error:", error);
-    } else if (data) {
+    } else {
       // Clear the ride from state and localStorage
       setRideRequest(null);
       setQueuePosition({ position: 0, total: 0 });
@@ -957,21 +956,21 @@ function RiderContent() {
                     <span>Driver: {rideRequest.driver.profile.full_name}</span>
                   </div>
                 )}
-              </div>
 
-              {/* Cancel Ride Button - show for cancellable statuses */}
-              {rideRequest && ["waiting", "assigned", "arrived"].includes(rideRequest.status) && (
-                <div className="border-t border-dark-800 pt-4">
-                  <Button
-                    variant="ghost"
-                    className="w-full text-red-400 hover:text-red-300"
-                    onClick={handleCancelRide}
-                    isLoading={isConfirming}
-                  >
-                    Cancel Ride
-                  </Button>
-                </div>
-              )}
+                {/* Cancel Ride Button - show for cancellable statuses */}
+                {["waiting", "assigned", "arrived"].includes(rideRequest.status) && (
+                  <div className="border-t border-dark-800 pt-3">
+                    <Button
+                      variant="ghost"
+                      className="w-full text-red-400 hover:text-red-300"
+                      onClick={handleCancelRide}
+                      isLoading={isConfirming}
+                    >
+                      Cancel Ride
+                    </Button>
+                  </div>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
