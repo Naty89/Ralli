@@ -5,7 +5,7 @@ import {
   getExistingActiveRide,
   checkAndUpdateRateLimit,
 } from "@/lib/services/rideGuardService";
-import { autoAssignAllRides } from "@/lib/services/rides";
+import { autoAssignAllRides } from "@/lib/services/rides-dispatch";
 import nodeCrypto from "crypto";
 
 const ACTIVE_STATUSES = ["waiting", "assigned", "arrived", "in_progress"];
