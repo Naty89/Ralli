@@ -464,9 +464,12 @@ function RiderContent() {
     // Check if this is an existing ride (Option A implementation)
     if (json.isExisting && json.data) {
       console.log("Found existing ride, showing modal");
+      console.log("Setting existingRideData:", json.data);
+      console.log("Setting showExistingRideModal to true");
       setExistingRideData(json.data);
       setShowExistingRideModal(true);
       setIsLoading(false);
+      console.log("State updated, modal should now be visible");
       return;
     }
 
@@ -1026,9 +1029,10 @@ function RiderContent() {
         )}
 
       {/* Existing Ride Modal - Option A: Prompt user when duplicate detected */}
+      {console.log("Modal render check - showExistingRideModal:", showExistingRideModal, "hasData:", !!existingRideData)}
       {showExistingRideModal && existingRideData && (
         <>
-          {console.log("Showing existing ride modal for ride:", { id: existingRideData.id, status: existingRideData.status })}
+          {console.log("✅ RENDERING Existing ride modal for ride:", { id: existingRideData.id, status: existingRideData.status })}
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <Card className="w-full max-w-md">
               <CardHeader>
