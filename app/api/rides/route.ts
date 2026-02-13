@@ -5,6 +5,7 @@ import {
   getExistingActiveRide,
   checkAndUpdateRateLimit,
 } from "@/lib/services/rideGuardService";
+import { autoAssignAllRides } from "@/lib/services/rides";
 import nodeCrypto from "crypto";
 
 const ACTIVE_STATUSES = ["waiting", "assigned", "arrived", "in_progress"];
@@ -180,6 +181,16 @@ export async function POST(request: Request) {
         });
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Trigger auto-assignment of rides after successful creation
+    // Run in background - don't wait for it
+    try {
+      autoAssignAllRides(event_id).catch((err) => {
+        console.error("Auto-assign error:", err);
+      });
+    } catch (err) {
+      console.error("Failed to trigger auto-assign:", err);
     }
 
     return NextResponse.json({ data, isExisting: false });
