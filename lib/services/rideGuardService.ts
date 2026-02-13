@@ -38,10 +38,14 @@ export async function getExistingActiveRide(
     .order("created_at", { ascending: false })
     .limit(1);
 
-  if (normalizedPhone) {
-    // prefer matching by normalized phone if available
-    query = query.or(`rider_phone_normalized.eq.${normalizedPhone},rider_identifier_hash.eq.${riderIdentifier || ""}`);
+  if (normalizedPhone && riderIdentifier) {
+    // Prefer matching by normalized phone if available, but also include identifier in OR
+    query = query.or(`rider_phone_normalized.eq.${normalizedPhone},rider_identifier_hash.eq.${riderIdentifier}`);
+  } else if (normalizedPhone) {
+    // Match by phone only
+    query = query.eq("rider_phone_normalized", normalizedPhone);
   } else if (riderIdentifier) {
+    // Match by identifier only
     query = query.eq("rider_identifier_hash", riderIdentifier);
   }
 
