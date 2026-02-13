@@ -463,13 +463,24 @@ function RiderContent() {
 
     // Check if this is an existing ride (Option A implementation)
     if (json.isExisting && json.data) {
-      console.log("Found existing ride, showing modal");
-      console.log("Setting existingRideData:", json.data);
-      console.log("Setting showExistingRideModal to true");
-      setExistingRideData(json.data);
-      setShowExistingRideModal(true);
+      console.log("Found existing ride, showing it directly");
+      const existingRide = json.data as RideRequest;
+      setRideRequest(existingRide);
+      setError(""); // Clear any prior error
+
+      // Get queue position if ride is waiting
+      if (existingRide.status === "waiting" && event) {
+        const pos = await getQueuePosition(existingRide.id, event.id);
+        setQueuePosition(pos);
+      }
+
+      setStep("status");
       setIsLoading(false);
-      console.log("State updated, modal should now be visible");
+
+      // Store ride id for client-side rehydration
+      try {
+        localStorage.setItem("ralli_ride_id", existingRide.id);
+      } catch {}
       return;
     }
 
@@ -1029,10 +1040,8 @@ function RiderContent() {
         )}
 
       {/* Existing Ride Modal - Option A: Prompt user when duplicate detected */}
-      {console.log("Modal render check - showExistingRideModal:", showExistingRideModal, "hasData:", !!existingRideData)}
       {showExistingRideModal && existingRideData && (
         <>
-          {console.log("✅ RENDERING Existing ride modal for ride:", { id: existingRideData.id, status: existingRideData.status })}
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <Card className="w-full max-w-md">
               <CardHeader>
