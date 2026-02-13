@@ -51,17 +51,12 @@ export async function getExistingActiveRide(
 }
 
 // Simple rate limiter: allow up to 3 requests within 10 minutes
+// Note: Idempotency check (existing ride detection) must be done BEFORE calling this
 export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: string) {
   const admin = createAdminClient();
   const TEN_MINUTES = 10 * 60; // seconds
-  // If an active ride already exists for this identifier, allow operations
-  try {
-    const existing = await getExistingActiveRide(eventId, riderIdentifier);
-    if (existing) return { allowed: true };
-  } catch (e) {
-    // ignore errors from existence check and continue with rate limiting
-  }
-  // Fetch existing record
+
+  // Fetch existing rate limit record
   const { data: existing, error: selErr } = await admin
     .from("rider_rate_limits")
     .select("*")
@@ -74,7 +69,7 @@ export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: 
   const now = new Date();
 
   if (!existing) {
-    // Insert new record
+    // Insert new record with first request
     const { error: insErr } = await admin.from("rider_rate_limits").insert({
       event_id: eventId,
       rider_identifier_hash: riderIdentifier,
@@ -102,7 +97,7 @@ export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: 
     return { allowed: false };
   }
 
-  // Increment
+  // Increment request count
   const { error: incErr } = await admin
     .from("rider_rate_limits")
     .update({ request_count: (existing.request_count || 0) + 1, last_request_timestamp: now })

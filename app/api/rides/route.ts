@@ -54,6 +54,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   // Create ride idempotently server-side
+  // Option A: Check for existing active ride BEFORE applying rate limiting
   try {
     const body = await request.json();
     const {
@@ -72,59 +73,60 @@ export async function POST(request: Request) {
 
     const ip = getIp(request);
     const ua = request.headers.get("user-agent") || "";
-    // Prefer normalized phone for stable identification, then client_id, then fallback
     const rawPhone = rider_phone || null;
+
+    // Step 1: Normalize phone number
     const normalizedPhone = rawPhone ? rawPhone.replace(/\D/g, "") : null;
     const phoneForId = normalizedPhone && normalizedPhone.length >= 10 ? normalizedPhone : null;
     const clientId = body.client_id || null;
 
+    // Step 2: Check for existing active ride by phone_normalized
+    if (phoneForId) {
+      const existingByPhone = await getExistingActiveRide(event_id, null, phoneForId);
+      if (existingByPhone) {
+        return NextResponse.json({ data: existingByPhone });
+      }
+    }
+
+    // Step 3: Check for existing active ride by client_id
+    let clientIdHash: string | null = null;
+    if (clientId) {
+      clientIdHash = nodeCrypto
+        .createHash("sha256")
+        .update(`${event_id}:${clientId}`)
+        .digest("hex");
+      const existingByClientId = await getExistingActiveRide(event_id, clientIdHash, null);
+      if (existingByClientId) {
+        return NextResponse.json({ data: existingByClientId });
+      }
+    }
+
+    // Step 4: Compute identifier hash and check for existing active ride by identifier_hash
     let identifier: string;
     if (phoneForId) {
-      identifier = nodeCrypto.createHash("sha256").update(`${event_id}:${phoneForId}`).digest("hex");
+      identifier = nodeCrypto
+        .createHash("sha256")
+        .update(`${event_id}:${phoneForId}`)
+        .digest("hex");
     } else if (clientId) {
-      identifier = nodeCrypto.createHash("sha256").update(`${event_id}:${clientId}`).digest("hex");
+      identifier = clientIdHash!;
     } else {
       identifier = generateRiderIdentifier(event_id, rider_name, ip, ua);
     }
 
-    // Rate limit check
-    const rate = await checkAndUpdateRateLimit(event_id, identifier);
-    if (!rate.allowed) {
-      // If a recent active ride already exists for this identifier, return it
-      const existingOnRateLimit = await getExistingActiveRide(event_id, identifier, phoneForId);
-      if (existingOnRateLimit) {
-        return NextResponse.json({ data: existingOnRateLimit });
-      }
-      return NextResponse.json({ error: "Please wait before requesting another ride." }, { status: 429 });
+    const existingByIdentifier = await getExistingActiveRide(event_id, identifier, null);
+    if (existingByIdentifier) {
+      return NextResponse.json({ data: existingByIdentifier });
     }
 
-    // Check for existing active ride
-    const existing = await getExistingActiveRide(event_id, identifier, phoneForId);
-    if (existing) {
-      // Update existing ride with any new/changed fields (passenger count, pickup, phone)
-      const admin = createAdminClient();
-      const updateFields: any = {
-        rider_name,
-        rider_phone: rider_phone || null,
-        rider_phone_normalized: phoneForId || null,
-        pickup_address: pickup_address ?? existing.pickup_address,
-        pickup_lat: pickup_lat ?? existing.pickup_lat,
-        pickup_lng: pickup_lng ?? existing.pickup_lng,
-        passenger_count: passenger_count ?? existing.passenger_count,
-      };
-
-      const { data: updated, error: updErr } = await admin
-        .from("ride_requests")
-        .update(updateFields)
-        .eq("id", existing.id)
-        .select()
-        .single();
-
-      if (updErr) {
-        return NextResponse.json({ error: updErr.message }, { status: 500 });
-      }
-
-      return NextResponse.json({ data: updated });
+    // Step 5: If found, return existing ride (200) - all checked above
+    // Step 6: Only apply rate limiter if no existing ride is found
+    const rate = await checkAndUpdateRateLimit(event_id, identifier);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Please wait before requesting another ride." },
+        { status: 429 }
+      );
     }
 
     // Insert new ride using admin client
@@ -147,7 +149,7 @@ export async function POST(request: Request) {
     if (error) {
       // If unique constraint on active ride violated, return existing
       if (error.code === "23505") {
-        const found = await getExistingActiveRide(event_id, identifier);
+        const found = await getExistingActiveRide(event_id, identifier, phoneForId);
         return NextResponse.json({ data: found || null });
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
