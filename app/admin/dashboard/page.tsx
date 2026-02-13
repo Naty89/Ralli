@@ -13,6 +13,7 @@ import {
   Copy,
   CheckCircle,
   Share2,
+  Edit2,
 } from "lucide-react";
 import { Button } from "@/components/ui";
 import { Input } from "@/components/ui";
@@ -20,7 +21,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
 import { Badge } from "@/components/ui";
 import { PlacesAutocomplete } from "@/components/PlacesAutocomplete";
 import { getCurrentUser, signOut } from "@/lib/services/auth";
-import { getAdminEvents, createEvent, toggleEventActive } from "@/lib/services/events";
+import { getAdminEvents, createEvent, toggleEventActive, updateEvent } from "@/lib/services/events";
 import { Event, Profile } from "@/types/database";
 
 export default function AdminDashboardPage() {
@@ -29,6 +30,8 @@ export default function AdminDashboardPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [copied, setCopied] = useState(false);
   const [shareLinkCopiedEventId, setShareLinkCopiedEventId] = useState<string | null>(null);
 
@@ -206,6 +209,17 @@ export default function AdminDashboardPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          setSelectedEvent(event);
+                          setShowEditModal(true);
+                        }}
+                        className="min-h-[44px] min-w-[44px] p-2 flex items-center justify-center rounded-lg bg-dark-800 text-dark-400 hover:bg-dark-700 hover:text-primary-400 transition-colors active:scale-95"
+                        title="Edit Event"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleToggleEvent(event.id, event.is_active);
                         }}
                         className={`min-h-[44px] min-w-[44px] p-2 flex items-center justify-center rounded-lg transition-colors active:scale-95 ${
@@ -233,6 +247,21 @@ export default function AdminDashboardPage() {
           onClose={() => setShowCreateModal(false)}
           onCreated={() => {
             setShowCreateModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {/* Edit Event Modal */}
+      {showEditModal && (
+        <EditEventModal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedEvent(null);
+          }}
+          event={selectedEvent}
+          onSuccess={() => {
             loadData();
           }}
         />
@@ -346,6 +375,174 @@ function CreateEventModal({
             </Button>
             <Button type="submit" isLoading={isLoading} className="flex-1">
               Create Event
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditEventModal({
+  isOpen,
+  onClose,
+  event,
+  onSuccess,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  event: Event | null;
+  onSuccess: () => void;
+}) {
+  const [eventName, setEventName] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [eventAddress, setEventAddress] = useState("");
+  const [eventLat, setEventLat] = useState(0);
+  const [eventLng, setEventLng] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  // Pre-populate form when event changes
+  useEffect(() => {
+    if (event) {
+      setEventName(event.event_name);
+      // Convert ISO strings to datetime-local format (YYYY-MM-DDTHH:mm)
+      setStartTime(event.start_time ? new Date(event.start_time).toISOString().slice(0, 16) : "");
+      setEndTime(event.end_time ? new Date(event.end_time).toISOString().slice(0, 16) : "");
+      setEventAddress(event.event_address || "");
+      setEventLat(event.event_lat || 0);
+      setEventLng(event.event_lng || 0);
+    }
+  }, [event]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!event) return;
+
+    setError("");
+    setIsLoading(true);
+
+    // Validation
+    if (!eventName.trim()) {
+      setError("Event name is required");
+      setIsLoading(false);
+      return;
+    }
+
+    if (!startTime || !endTime) {
+      setError("Start time and end time are required");
+      setIsLoading(false);
+      return;
+    }
+
+    // Ensure end time is after start time
+    if (new Date(endTime) <= new Date(startTime)) {
+      setError("End time must be after start time");
+      setIsLoading(false);
+      return;
+    }
+
+    // Build updates object
+    const updates: any = {
+      event_name: eventName.trim(),
+      start_time: new Date(startTime).toISOString(),
+      end_time: new Date(endTime).toISOString(),
+    };
+
+    // Include location if provided
+    if (eventAddress && eventLat && eventLng) {
+      updates.event_address = eventAddress;
+      updates.event_lat = eventLat;
+      updates.event_lng = eventLng;
+    }
+
+    const { error: updateError } = await updateEvent(event.id, updates);
+
+    if (updateError) {
+      setError(updateError.message);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(false);
+    onSuccess();
+    onClose();
+  };
+
+  if (!isOpen || !event) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
+      <div className="bg-dark-900 rounded-t-2xl sm:rounded-xl border border-dark-800 max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+        <h2 className="text-xl font-bold mb-4">Edit Event</h2>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Input
+            label="Event Name"
+            value={eventName}
+            onChange={(e) => setEventName(e.target.value)}
+            placeholder="e.g., Spring Formal"
+            required
+          />
+
+          <Input
+            label="Start Time"
+            type="datetime-local"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            required
+          />
+
+          <Input
+            label="End Time"
+            type="datetime-local"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+            required
+          />
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Event Location (Optional)
+            </label>
+            <PlacesAutocomplete
+              value={eventAddress}
+              onChange={setEventAddress}
+              onPlaceSelect={(place) => {
+                setEventAddress(place.address);
+                setEventLat(place.lat);
+                setEventLng(place.lng);
+              }}
+              placeholder="Enter event address"
+            />
+            <p className="text-xs text-dark-500 mt-1">
+              Update location if needed for ride directions
+            </p>
+          </div>
+
+          {error && (
+            <div className="text-red-400 text-sm bg-red-900/20 p-3 rounded">
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={onClose}
+              disabled={isLoading}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              isLoading={isLoading}
+              className="flex-1"
+            >
+              Save Changes
             </Button>
           </div>
         </form>
