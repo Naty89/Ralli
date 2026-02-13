@@ -110,6 +110,7 @@ export async function autoAssignNextRide(
 
   // Create batch with nearby rides
   const totalPassengers = ridesToBatch.reduce((sum, ride) => sum + ride.passenger_count, 0);
+  console.log(`[Batch Mode] Found ${ridesToBatch.length} rides within ${BATCH_RADIUS_KM}km. Total passengers: ${totalPassengers}. Driver capacity: ${driver.max_capacity}`);
 
   // Check driver capacity
   if (totalPassengers > (driver.max_capacity || 4)) {
@@ -135,6 +136,7 @@ export async function autoAssignNextRide(
     .single();
 
   if (batchError || !batch) {
+    console.log(`[Batch Mode] Batch creation failed, falling back to single ride. Error: ${batchError?.message}`);
     // Fallback to single ride
     const { error: assignError } = await assignDriverToRide(firstRide.id, driver.id);
     if (assignError) {
@@ -143,22 +145,26 @@ export async function autoAssignNextRide(
     return { assigned: true, error: null };
   }
 
+  console.log(`[Batch Mode] Batch created successfully (ID: ${batch.id}). Assigning ${ridesToBatch.length} rides...`);
+
   // Assign all rides in batch to driver
   for (let i = 0; i < ridesToBatch.length; i++) {
     const ride = ridesToBatch[i];
+    console.log(`[Batch Mode] Assigning ride ${ride.id} (${ride.rider_name}) to batch ${batch.id}`);
     const { error: assignError } = await admin
       .from("ride_requests")
       .update({ assigned_driver_id: driver.id, batch_id: batch.id, status: "assigned" })
       .eq("id", ride.id);
 
     if (assignError) {
-      console.error("Error assigning ride to batch:", assignError);
+      console.error(`[Batch Mode] Error assigning ride ${ride.id}:`, assignError);
     }
   }
 
   // Update driver status
   await admin.from("drivers").update({ current_status: "assigned" }).eq("id", driver.id);
 
+  console.log(`[Batch Mode] Batch assignment complete. Driver ${driver.id} assigned to batch ${batch.id}`);
   return { assigned: true, error: null };
 }
 

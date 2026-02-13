@@ -616,12 +616,17 @@ export default function AdminEventPage() {
                 {rides
                   .filter((r) => !["completed", "cancelled", "no_show"].includes(r.status))
                   .map((ride, index) => (
-                    <Card key={ride.id} className="p-4">
+                    <Card key={ride.id} className={`p-4 ${ride.batch_id ? "border-purple-600/50 bg-purple-900/10" : ""}`}>
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
                             {ride.status === "waiting" && (
                               <span className="text-xs text-dark-500">#{index + 1}</span>
+                            )}
+                            {ride.batch_id && (
+                              <span className="text-xs bg-purple-600/40 text-purple-300 px-2 py-1 rounded">
+                                Batch
+                              </span>
                             )}
                             <span className="font-medium">{ride.rider_name}</span>
                             <RideStatusBadge status={ride.status} />
