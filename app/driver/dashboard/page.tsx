@@ -27,7 +27,7 @@ import {
   updateDriverLocation,
   subscribeToDriver,
 } from "@/lib/services/drivers";
-import { subscribeToRideRequest } from "@/lib/services/rides";
+import { subscribeToRideRequest, cancelRideRequest } from "@/lib/services/rides";
 import { getEventById } from "@/lib/services/events";
 import { transitionRideStatus } from "@/lib/services/dispatchService";
 import { updateRideETA, formatETA } from "@/lib/services/etaService";
@@ -242,6 +242,27 @@ export default function DriverDashboardPage() {
       userLocation?.lat || driver.current_lat,
       userLocation?.lng || driver.current_lng
     );
+  };
+
+  // Handle cancel ride
+  const handleCancelRide = async () => {
+    if (!currentRide) return;
+
+    if (!window.confirm("Are you sure you want to cancel this ride? The rider will be notified.")) {
+      return;
+    }
+
+    setIsUpdating(true);
+    const { error } = await cancelRideRequest(currentRide.id);
+
+    if (error) {
+      console.error("Cancel ride error:", error);
+      alert("Failed to cancel ride");
+    } else {
+      setCurrentRide(null);
+      await loadDriverData(profile?.id);
+    }
+    setIsUpdating(false);
   };
 
   if (isLoading) {
@@ -501,6 +522,18 @@ export default function DriverDashboardPage() {
                   </Button>
                 )}
               </div>
+
+              {/* Cancel Button - show for cancellable statuses */}
+              {["assigned", "arrived"].includes(currentRide.status) && (
+                <Button
+                  variant="ghost"
+                  className="w-full text-red-400 hover:text-red-300 mt-2"
+                  onClick={handleCancelRide}
+                  isLoading={isUpdating}
+                >
+                  Cancel Ride
+                </Button>
+              )}
             </div>
           </Card>
         )}

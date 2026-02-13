@@ -459,7 +459,7 @@ function RiderContent() {
     });
 
     const json = await resp.json();
-    console.log("Ride API response:", { status: resp.status, isExisting: json.isExisting, hasData: !!json.data });
+    console.log("Ride API response:", { status: resp.status, isExisting: json.isExisting, hasData: !!json.data, error: json.error });
 
     // Check if this is an existing ride (Option A implementation)
     if (json.isExisting && json.data) {
@@ -470,25 +470,44 @@ function RiderContent() {
       return;
     }
 
+    // If API returned 200 but no error, try to find existing ride by phone/identifier
+    if (resp.ok && !json.error && !json.data) {
+      console.log("Checking for existing ride by phone/identifier...");
+      try {
+        const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
+        if (riderPhone) params.set("rider_phone", riderPhone.trim());
+        if (clientId) params.set("client_id", clientId);
+        const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
+        const checkJson = await check.json();
+        console.log("Existing ride check response:", checkJson);
+        if (check.ok && checkJson?.data) {
+          setExistingRideData(checkJson.data);
+          setShowExistingRideModal(true);
+          setIsLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Error checking existing ride:", err);
+      }
+    }
+
     if (!resp.ok || json.error) {
-      // If rate limited, attempt to fetch existing ride by identifier/client_id
+      // If rate limited, attempt to fetch existing ride
       if (resp.status === 429) {
         try {
           const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
+          if (riderPhone) params.set("rider_phone", riderPhone.trim());
           if (clientId) params.set("client_id", clientId);
           const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
           const checkJson = await check.json();
-          if (check.ok && checkJson && (checkJson.data || checkJson.identifier)) {
-            const existing = checkJson.data || null;
-            if (existing) {
-              setExistingRideData(existing);
-              setShowExistingRideModal(true);
-              setIsLoading(false);
-              return;
-            }
+          if (check.ok && checkJson?.data) {
+            setExistingRideData(checkJson.data);
+            setShowExistingRideModal(true);
+            setIsLoading(false);
+            return;
           }
         } catch (err) {
-          // fallthrough to show rate limit message
+          console.error("Error fetching existing ride on rate limit:", err);
         }
       }
 
@@ -1037,20 +1056,41 @@ function RiderContent() {
               </div>
 
               <div className="space-y-2">
-                <Button
-                  onClick={handleViewExistingRide}
-                  className="w-full"
-                  variant="primary"
-                >
-                  View Ride Status
-                </Button>
-                <Button
-                  onClick={handleEditExistingRide}
-                  className="w-full"
-                  variant="secondary"
-                >
-                  Edit Request
-                </Button>
+                {/* If driver hasn't arrived yet, prioritize edit button */}
+                {["waiting", "assigned"].includes(existingRideData.status) ? (
+                  <>
+                    <Button
+                      onClick={handleEditExistingRide}
+                      className="w-full"
+                      variant="primary"
+                    >
+                      Edit Request
+                    </Button>
+                    <p className="text-xs text-dark-400 text-center">
+                      You can edit your pickup location or passenger count
+                    </p>
+                    <Button
+                      onClick={handleViewExistingRide}
+                      className="w-full"
+                      variant="secondary"
+                    >
+                      View Ride Status
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      onClick={handleViewExistingRide}
+                      className="w-full"
+                      variant="primary"
+                    >
+                      View Ride Status
+                    </Button>
+                    <p className="text-xs text-dark-400 text-center">
+                      Driver is on the way - editing not available
+                    </p>
+                  </>
+                )}
                 <Button
                   onClick={handleCancelExistingRide}
                   className="w-full"
