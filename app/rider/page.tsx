@@ -353,47 +353,47 @@ function RiderContent() {
   const handleRideSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (passengerCount < 1 || passengerCount > 4) {
-      setError("Passenger count must be between 1 and 4");
-      return;
-    }
+    try {
+      if (passengerCount < 1 || passengerCount > 4) {
+        setError("Passenger count must be between 1 and 4");
+        return;
+      }
 
-    if (!pickupAddress.trim()) {
-      setError("Please enter a pickup address");
-      return;
-    }
+      if (!pickupAddress.trim()) {
+        setError("Please enter a pickup address");
+        return;
+      }
 
-    // If event has location, validate dropoff address
-    if (event?.event_address && !dropoffAddress.trim()) {
-      setError("Please enter a dropoff address");
-      return;
-    }
+      // If event has location, validate dropoff address
+      if (event?.event_address && !dropoffAddress.trim()) {
+        setError("Please enter a dropoff address");
+        return;
+      }
 
-    if (!riderPhone.trim()) {
-      setError("Phone number is required");
-      return;
-    }
-    const phoneDigits = riderPhone.replace(/\D/g, "");
-    if (phoneDigits.length < 10) {
-      setError("Please enter a valid phone number (at least 10 digits)");
-      return;
-    }
+      if (!riderPhone.trim()) {
+        setError("Phone number is required");
+        return;
+      }
+      const phoneDigits = riderPhone.replace(/\D/g, "");
+      if (phoneDigits.length < 10) {
+        setError("Please enter a valid phone number (at least 10 digits)");
+        return;
+      }
 
-    // Check if rider needs to accept TOS first
-    if (!hasConsent) {
-      setShowTOSModal(true);
-      return;
-    }
+      // Check if rider needs to accept TOS first
+      if (!hasConsent) {
+        setShowTOSModal(true);
+        return;
+      }
 
-    // Check cooldown
-    if (cooldownStatus?.is_in_cooldown) {
-      setError("You are in a cooldown period. Please wait before requesting another ride.");
-      return;
-    }
+      // Check cooldown
+      if (cooldownStatus?.is_in_cooldown) {
+        setError("You are in a cooldown period. Please wait before requesting another ride.");
+        return;
+      }
 
-
-    setIsLoading(true);
-    setError("");
+      setIsLoading(true);
+      setError("");
 
     // For MVP, use a default location if geocoding not set up
     const lat = pickupLat || 40.7128;
@@ -427,9 +427,11 @@ function RiderContent() {
     });
 
     const json = await resp.json();
+    console.log("Ride API response:", { status: resp.status, isExisting: json.isExisting, hasData: !!json.data });
 
     // Check if this is an existing ride (Option A implementation)
     if (json.isExisting && json.data) {
+      console.log("Found existing ride, showing modal");
       setExistingRideData(json.data);
       setShowExistingRideModal(true);
       setIsLoading(false);
@@ -479,6 +481,11 @@ function RiderContent() {
 
     setStep("status");
     setIsLoading(false);
+    } catch (err) {
+      console.error("Error submitting ride:", err);
+      setError((err as Error).message || "An unexpected error occurred");
+      setIsLoading(false);
+    }
   };
 
   // Access Code Entry
