@@ -147,10 +147,13 @@ export async function autoAssignNextRide(
 
   console.log(`[Batch Mode] Batch created successfully (ID: ${batch.id}). Assigning ${ridesToBatch.length} rides...`);
 
-  // Assign all rides in batch to driver
+  // Assign all rides in batch to driver AND create batch items
+  const batchItemsToCreate = [];
   for (let i = 0; i < ridesToBatch.length; i++) {
     const ride = ridesToBatch[i];
     console.log(`[Batch Mode] Assigning ride ${ride.id} (${ride.rider_name}) to batch ${batch.id}`);
+
+    // Update ride with batch assignment
     const { error: assignError } = await admin
       .from("ride_requests")
       .update({ assigned_driver_id: driver.id, batch_id: batch.id, status: "assigned" })
@@ -158,6 +161,27 @@ export async function autoAssignNextRide(
 
     if (assignError) {
       console.error(`[Batch Mode] Error assigning ride ${ride.id}:`, assignError);
+    } else {
+      // Create batch item so driver can see this ride in batch
+      batchItemsToCreate.push({
+        batch_id: batch.id,
+        ride_id: ride.id,
+        pickup_order_index: i,
+        picked_up: false,
+      });
+    }
+  }
+
+  // Create all batch items in one call
+  if (batchItemsToCreate.length > 0) {
+    const { error: itemsError } = await admin
+      .from("ride_batch_items")
+      .insert(batchItemsToCreate);
+
+    if (itemsError) {
+      console.error(`[Batch Mode] Error creating batch items:`, itemsError);
+    } else {
+      console.log(`[Batch Mode] Created ${batchItemsToCreate.length} batch items`);
     }
   }
 
