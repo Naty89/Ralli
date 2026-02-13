@@ -344,17 +344,29 @@ export default function DriverDashboardPage() {
                   : "You have an active ride"}
               </p>
             </div>
-            <button
-              onClick={handleToggleOnline}
-              disabled={isUpdating || driver.current_status === "assigned"}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
-                driver.current_status === "offline"
-                  ? "bg-dark-800 hover:bg-dark-700 text-dark-400"
-                  : "bg-green-600 hover:bg-green-700 text-white"
-              } ${isUpdating ? "opacity-50" : ""}`}
-            >
-              <Power className="h-8 w-8" />
-            </button>
+            <div className="flex items-center gap-3">
+              {driver.current_status === "available" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => loadRideData()}
+                  isLoading={isUpdating}
+                >
+                  Refresh
+                </Button>
+              )}
+              <button
+                onClick={handleToggleOnline}
+                disabled={isUpdating || driver.current_status === "assigned"}
+                className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
+                  driver.current_status === "offline"
+                    ? "bg-dark-800 hover:bg-dark-700 text-dark-400"
+                    : "bg-green-600 hover:bg-green-700 text-white"
+                } ${isUpdating ? "opacity-50" : ""}`}
+              >
+                <Power className="h-8 w-8" />
+              </button>
+            </div>
           </div>
         </Card>
 
