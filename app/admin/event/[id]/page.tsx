@@ -54,7 +54,6 @@ import {
   resolveEmergency,
   subscribeToEmergencies,
 } from "@/lib/services/emergencyService";
-import { batchDispatch } from "@/lib/services/batchService";
 import { AdminDriverMap } from "@/components/AdminDriverMap";
 import { Event, RideRequest, Driver, Profile, EventAnalytics, EmergencyEvent } from "@/types/database";
 
@@ -123,13 +122,10 @@ export default function AdminEventPage() {
     setIsAutoAssigning(true);
     setDispatchError(null);
     try {
-      if (batchMode) {
-        const result = await batchDispatch(eventId);
-        if (result.error) setDispatchError(result.error.message);
-      } else {
-        const result = await dispatchAllRides(eventId);
-        if (result.error) setDispatchError(result.error.message);
-      }
+      // Both batch and non-batch modes use dispatchAllRides
+      // Batch logic is handled server-side in rides-dispatch.ts based on batch_mode_enabled flag
+      const result = await dispatchAllRides(eventId);
+      if (result.error) setDispatchError(result.error.message);
     } catch (err) {
       setDispatchError(err instanceof Error ? err.message : "Dispatch failed");
     }
