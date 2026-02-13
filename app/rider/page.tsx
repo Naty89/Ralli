@@ -1027,33 +1027,35 @@ function RiderContent() {
 
       {/* Existing Ride Modal - Option A: Prompt user when duplicate detected */}
       {showExistingRideModal && existingRideData && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-amber-500">
-                <AlertTriangle className="h-5 w-5" />
-                Ride Already Exists
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-dark-300">
-                You already have an active ride in the queue. Would you like to view it or edit your request?
-              </p>
+        <>
+          {console.log("Showing existing ride modal for ride:", { id: existingRideData.id, status: existingRideData.status })}
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <Card className="w-full max-w-md">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-amber-500">
+                  <AlertTriangle className="h-5 w-5" />
+                  Ride Already Exists
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-dark-300">
+                  You already have an active ride in the queue. Would you like to view it or edit your request?
+                </p>
 
-              <div className="bg-dark-800 rounded-lg p-3 space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-dark-400">Pickup Location:</span>
-                  <span className="text-dark-200">{existingRideData.pickup_address}</span>
+                <div className="bg-dark-800 rounded-lg p-3 space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-dark-400">Pickup Location:</span>
+                    <span className="text-dark-200">{existingRideData.pickup_address}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dark-400">Passengers:</span>
+                    <span className="text-dark-200">{existingRideData.passenger_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-dark-400">Status:</span>
+                    <RideStatusBadge status={existingRideData.status} />
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-dark-400">Passengers:</span>
-                  <span className="text-dark-200">{existingRideData.passenger_count}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-dark-400">Status:</span>
-                  <RideStatusBadge status={existingRideData.status} />
-                </div>
-              </div>
 
               <div className="space-y-2">
                 {/* If driver hasn't arrived yet, prioritize edit button */}
@@ -1101,7 +1103,8 @@ function RiderContent() {
               </div>
             </CardContent>
           </Card>
-        </div>
+          </div>
+        </>
       )}
     </div>
   );
