@@ -207,16 +207,21 @@ export async function updateRideStatus(
 export async function cancelRideRequest(
   requestId: string
 ): Promise<{ error: Error | null }> {
-  const { error } = await supabase
-    .from("ride_requests")
-    .update({ status: "cancelled" as RideStatus })
-    .eq("id", requestId);
+  try {
+    const response = await fetch(`/api/rides/${requestId}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
 
-  if (error) {
-    return { error: new Error(error.message) };
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { error: new Error(errorData.error || "Failed to cancel ride") };
+    }
+
+    return { error: null };
+  } catch (err) {
+    return { error: new Error((err as Error).message || "Failed to cancel ride") };
   }
-
-  return { error: null };
 }
 
 // Subscribe to ride request updates
