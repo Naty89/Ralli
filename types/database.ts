@@ -53,6 +53,7 @@ export interface Event {
   created_by: string;
   admin_email?: string;
   batch_mode_enabled: boolean;
+  auto_dispatch_enabled: boolean;
   event_address?: string;
   event_lat?: number;
   event_lng?: number;

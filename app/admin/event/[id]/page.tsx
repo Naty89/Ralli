@@ -152,6 +152,13 @@ export default function AdminEventPage() {
     await updateEvent(eventId, { batch_mode_enabled: newValue });
   };
 
+  const toggleAutoDispatch = async () => {
+    const newValue = !autoAssign;
+    setAutoAssign(newValue);
+    // Persist to event settings
+    await updateEvent(eventId, { auto_dispatch_enabled: newValue });
+  };
+
   const loadAnalytics = async () => {
     const { data } = await getEventAnalytics(eventId);
     setAnalytics(data);
@@ -172,6 +179,7 @@ export default function AdminEventPage() {
     }
     setEvent(eventData);
     setBatchMode(eventData.batch_mode_enabled || false);
+    setAutoAssign(eventData.auto_dispatch_enabled || false);
 
     await loadRides();
     await loadDrivers();
@@ -348,7 +356,7 @@ export default function AdminEventPage() {
                 <span className="hidden sm:inline">{batchMode ? "Batch ON" : "Batch"}</span>
               </button>
               <button
-                onClick={() => setAutoAssign(!autoAssign)}
+                onClick={toggleAutoDispatch}
                 className={`flex items-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                   autoAssign
                     ? "bg-green-600 text-white"
