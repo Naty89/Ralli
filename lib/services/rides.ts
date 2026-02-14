@@ -278,16 +278,21 @@ export async function updateRideRequest(
     dropoff_lng?: number;
   }
 ): Promise<{ data: RideRequest | null; error: Error | null }> {
-  const { data, error } = await supabase
-    .from("ride_requests")
-    .update(updates)
-    .eq("id", rideId)
-    .select()
-    .single();
+  try {
+    const response = await fetch(`/api/rides/${rideId}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
 
-  if (error) {
-    return { data: null, error: new Error(error.message) };
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { data: null, error: new Error(errorData.error || "Failed to update ride") };
+    }
+
+    const result = await response.json();
+    return { data: result.data, error: null };
+  } catch (err) {
+    return { data: null, error: new Error((err as Error).message || "Failed to update ride") };
   }
-
-  return { data, error: null };
 }
