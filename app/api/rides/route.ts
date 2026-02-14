@@ -80,7 +80,7 @@ export async function POST(request: Request) {
     const admin = createAdminClient();
     const { data: event, error: eventError } = await admin
       .from("events")
-      .select("start_time")
+      .select("start_time, batch_mode_enabled")
       .eq("id", event_id)
       .single();
 
@@ -210,14 +210,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Trigger auto-assignment of rides after successful creation
+    // Trigger auto-assignment of rides ONLY if batch mode is enabled
     // Run in background - don't wait for it
-    try {
-      autoAssignAllRides(event_id).catch((err) => {
-        console.error("Auto-assign error:", err);
-      });
-    } catch (err) {
-      console.error("Failed to trigger auto-assign:", err);
+    if (event.batch_mode_enabled) {
+      try {
+        console.log(`[Ride API] Batch mode enabled, triggering auto-assign for event ${event_id}`);
+        autoAssignAllRides(event_id).catch((err) => {
+          console.error("Auto-assign error:", err);
+        });
+      } catch (err) {
+        console.error("Failed to trigger auto-assign:", err);
+      }
+    } else {
+      console.log(`[Ride API] Batch mode disabled, skipping auto-assign for event ${event_id}`);
     }
 
     return NextResponse.json({ data, isExisting: false });
