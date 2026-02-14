@@ -129,7 +129,6 @@ export async function autoAssignNextRide(
   }
 
   // Create batch
-  const admin = createAdminClient();
   const { data: batch, error: batchError } = await admin
     .from("ride_batches")
     .insert({
