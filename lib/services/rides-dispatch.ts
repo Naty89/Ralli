@@ -26,16 +26,22 @@ function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
 export async function autoAssignNextRide(
   eventId: string
 ): Promise<{ assigned: boolean; error: Error | null }> {
-  // Check if batch mode is enabled
-  const { data: event, error: eventError } = await supabase
+  console.log(`[Batch Mode] autoAssignNextRide called for event ${eventId}`);
+
+  // Check if batch mode is enabled (use admin client to bypass RLS)
+  const admin = createAdminClient();
+  const { data: event, error: eventError } = await admin
     .from("events")
     .select("batch_mode_enabled")
     .eq("id", eventId)
     .single();
 
   if (eventError || !event) {
+    console.error(`[Batch Mode] Failed to fetch event ${eventId}:`, eventError);
     return { assigned: false, error: new Error("Event not found") };
   }
+
+  console.log(`[Batch Mode] Event ${eventId} batch_mode_enabled:`, event.batch_mode_enabled);
 
   // Get oldest waiting ride with full details
   const { data: waitingRides, error: ridesError } = await supabase
