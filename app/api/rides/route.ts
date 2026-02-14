@@ -5,7 +5,6 @@ import {
   getExistingActiveRide,
   checkAndUpdateRateLimit,
 } from "@/lib/services/rideGuardService";
-import { autoAssignAllRides } from "@/lib/services/rides-dispatch";
 import nodeCrypto from "crypto";
 
 const ACTIVE_STATUSES = ["waiting", "assigned", "arrived", "in_progress"];
@@ -210,20 +209,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Trigger auto-assignment of rides ONLY if batch mode is enabled
-    // Run in background - don't wait for it
-    if (event.batch_mode_enabled) {
-      try {
-        console.log(`[Ride API] Batch mode enabled, triggering auto-assign for event ${event_id}`);
-        autoAssignAllRides(event_id).catch((err) => {
-          console.error("Auto-assign error:", err);
-        });
-      } catch (err) {
-        console.error("Failed to trigger auto-assign:", err);
-      }
-    } else {
-      console.log(`[Ride API] Batch mode disabled, skipping auto-assign for event ${event_id}`);
-    }
+    // Don't auto-assign here - let admin control dispatch via the Dispatch button
+    // This allows multiple rides to accumulate for batching before assignment
+    console.log(`[Ride API] Ride created. Admin can dispatch via Dispatch button when ready.`);
 
     return NextResponse.json({ data, isExisting: false });
   } catch (err) {
