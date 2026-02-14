@@ -37,11 +37,15 @@ export async function autoAssignNextRide(
     .single();
 
   if (eventError || !event) {
-    console.error(`[Batch Mode] Failed to fetch event ${eventId}:`, eventError);
+    console.error(`[Batch Mode] Failed to fetch event ${eventId}:`, eventError?.message);
     return { assigned: false, error: new Error("Event not found") };
   }
 
-  console.log(`[Batch Mode] Event ${eventId} batch_mode_enabled:`, event.batch_mode_enabled);
+  console.log(`[Batch Mode] Event ${eventId} fetched. batch_mode_enabled = ${event.batch_mode_enabled}`);
+
+  if (!event.batch_mode_enabled) {
+    console.log(`[Batch Mode] Batch mode disabled for event ${eventId}, using single ride assignment`);
+  }
 
   // Get oldest waiting ride with full details
   const { data: waitingRides, error: ridesError } = await supabase
@@ -53,12 +57,16 @@ export async function autoAssignNextRide(
     .limit(1) as { data: RideRequest[] | null; error: any };
 
   if (ridesError) {
+    console.error(`[Batch Mode] Error fetching waiting rides:`, ridesError.message);
     return { assigned: false, error: new Error(ridesError.message) };
   }
 
   if (!waitingRides || waitingRides.length === 0) {
+    console.log(`[Batch Mode] No waiting rides found for event ${eventId}`);
     return { assigned: false, error: null }; // No waiting rides
   }
+
+  console.log(`[Batch Mode] Found ${waitingRides.length} waiting ride(s)`);
 
   const firstRide = waitingRides[0];
 
