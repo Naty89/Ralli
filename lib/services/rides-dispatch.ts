@@ -1,142 +1,123 @@
-// Server-side only dispatch and auto-assignment functions
-// Do not import this from client components
+// Server-side only dispatch and auto-assignment functions.
+// Do not import this from client components.
 
 import { createAdminClient } from "@/lib/supabaseServer";
-import { supabase } from "@/lib/supabaseClient";
-import { RideRequest, Driver } from "@/types/database";
-import { assignDriverToRide } from "@/lib/services/rides";
+import { Driver, RideRequest } from "@/types/database";
+import { calculateETA, haversineDistance, orderStopsByNearestNeighbor } from "@/lib/services/geo";
 
-// Helper: Calculate haversine distance in km
-function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371; // Earth's radius in km
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// Rides within this radius of the oldest waiting ride may be batched together.
+export const BATCH_RADIUS_KM = 1.0;
 
-// Auto-assign: Get oldest waiting ride and first available driver, then assign
-// Supports batch mode: groups multiple nearby rides (within 1000m) into one batch
-export async function autoAssignNextRide(
-  eventId: string
-): Promise<{ assigned: boolean; error: Error | null }> {
-  console.log(`[Batch Mode] autoAssignNextRide called for event ${eventId}`);
+// Safety valve so a buggy loop can never spin forever.
+const MAX_ASSIGN_ITERATIONS = 50;
 
-  // Check if batch mode is enabled (use admin client to bypass RLS)
-  const admin = createAdminClient();
-  const { data: event, error: eventError } = await admin
-    .from("events")
-    .select("batch_mode_enabled")
-    .eq("id", eventId)
-    .single();
+type AdminClient = ReturnType<typeof createAdminClient>;
 
-  if (eventError || !event) {
-    console.error(`[Batch Mode] Failed to fetch event ${eventId}:`, eventError?.message);
-    return { assigned: false, error: new Error("Event not found") };
-  }
-
-  console.log(`[Batch Mode] Event ${eventId} fetched. batch_mode_enabled = ${event.batch_mode_enabled}`);
-
-  if (!event.batch_mode_enabled) {
-    console.log(`[Batch Mode] Batch mode disabled for event ${eventId}, using single ride assignment`);
-  }
-
-  // Get oldest waiting ride with full details
-  const { data: waitingRides, error: ridesError } = await supabase
+async function fetchWaitingRides(
+  admin: AdminClient,
+  eventId: string,
+  limit = 50
+): Promise<RideRequest[]> {
+  const { data, error } = await admin
     .from("ride_requests")
     .select("*")
     .eq("event_id", eventId)
     .eq("status", "waiting")
     .order("created_at", { ascending: true })
-    .limit(1) as { data: RideRequest[] | null; error: any };
+    .limit(limit);
 
-  if (ridesError) {
-    console.error(`[Batch Mode] Error fetching waiting rides:`, ridesError.message);
-    return { assigned: false, error: new Error(ridesError.message) };
-  }
+  if (error) throw new Error(error.message);
+  return (data || []) as RideRequest[];
+}
 
-  if (!waitingRides || waitingRides.length === 0) {
-    console.log(`[Batch Mode] No waiting rides found for event ${eventId}`);
-    return { assigned: false, error: null }; // No waiting rides
-  }
-
-  console.log(`[Batch Mode] Found ${waitingRides.length} waiting ride(s)`);
-
-  const firstRide = waitingRides[0];
-
-  // Get first available driver
-  const { data: availableDrivers, error: driversError } = await supabase
+async function fetchAvailableDrivers(
+  admin: AdminClient,
+  eventId: string
+): Promise<Driver[]> {
+  const { data, error } = await admin
     .from("drivers")
     .select("*")
     .eq("event_id", eventId)
-    .eq("current_status", "available")
-    .limit(1) as { data: Driver[] | null; error: any };
+    .eq("is_online", true)
+    .eq("current_status", "available");
 
-  if (driversError) {
-    return { assigned: false, error: new Error(driversError.message) };
-  }
+  if (error) throw new Error(error.message);
+  return (data || []) as Driver[];
+}
 
-  if (!availableDrivers || availableDrivers.length === 0) {
-    return { assigned: false, error: null }; // No available drivers
-  }
+// Prefer the closest driver that has shared a location; fall back to any
+// available driver (desktop drivers often have no location yet).
+export function pickNearestDriver(
+  drivers: Driver[],
+  lat: number,
+  lng: number
+): Driver | null {
+  if (drivers.length === 0) return null;
 
-  const driver = availableDrivers[0];
+  let nearest: Driver | null = null;
+  let minDistance = Infinity;
 
-  // If batch mode disabled, just assign single ride
-  if (!event.batch_mode_enabled) {
-    const { error: assignError } = await assignDriverToRide(firstRide.id, driver.id);
-    if (assignError) {
-      return { assigned: false, error: assignError };
+  for (const driver of drivers) {
+    if (driver.current_lat == null || driver.current_lng == null) continue;
+    const distance = haversineDistance(lat, lng, driver.current_lat, driver.current_lng);
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearest = driver;
     }
-    return { assigned: true, error: null };
   }
 
-  // Batch mode: find all waiting rides within 1000m (1km) radius
-  const { data: nearbyRides, error: nearbyError } = await supabase
+  return nearest ?? drivers[0];
+}
+
+// Assign one ride to one driver and reflect it on the driver record.
+export async function assignSingleRide(
+  admin: AdminClient,
+  ride: RideRequest,
+  driver: Driver
+): Promise<void> {
+  let etaMinutes: number | undefined;
+
+  if (driver.current_lat != null && driver.current_lng != null) {
+    const eta = await calculateETA(
+      driver.current_lat,
+      driver.current_lng,
+      ride.pickup_lat,
+      ride.pickup_lng
+    );
+    etaMinutes = eta.etaMinutes;
+  }
+
+  const { error: rideError } = await admin
     .from("ride_requests")
-    .select("*")
-    .eq("event_id", eventId)
-    .eq("status", "waiting")
-    .order("created_at", { ascending: true })
-    .limit(10) as { data: RideRequest[] | null; error: any };
+    .update({
+      assigned_driver_id: driver.id,
+      status: "assigned",
+      driver_eta_minutes: etaMinutes ?? null,
+    })
+    .eq("id", ride.id);
 
-  if (nearbyError || !nearbyRides) {
-    // Fallback to single ride assignment
-    const { error: assignError } = await assignDriverToRide(firstRide.id, driver.id);
-    if (assignError) {
-      return { assigned: false, error: assignError };
-    }
-    return { assigned: true, error: null };
-  }
+  if (rideError) throw new Error(rideError.message);
 
-  // Filter rides within 1000m (1km) radius of first ride
-  const BATCH_RADIUS_KM = 1.0;
-  const ridesToBatch = nearbyRides.filter((ride) => {
-    const distance = haversineDistance(firstRide.pickup_lat, firstRide.pickup_lng, ride.pickup_lat, ride.pickup_lng);
-    return distance <= BATCH_RADIUS_KM;
-  });
+  const { error: driverError } = await admin
+    .from("drivers")
+    .update({
+      current_status: "assigned",
+      current_passenger_load: (driver.current_passenger_load || 0) + ride.passenger_count,
+    })
+    .eq("id", driver.id);
 
-  // Create batch with nearby rides
-  const totalPassengers = ridesToBatch.reduce((sum, ride) => sum + ride.passenger_count, 0);
-  console.log(`[Batch Mode] Found ${ridesToBatch.length} rides within ${BATCH_RADIUS_KM}km. Total passengers: ${totalPassengers}. Driver capacity: ${driver.max_capacity}`);
+  if (driverError) throw new Error(driverError.message);
+}
 
-  // Check driver capacity
-  if (totalPassengers > (driver.max_capacity || 4)) {
-    // Driver capacity exceeded, just assign first ride
-    const { error: assignError } = await assignDriverToRide(firstRide.id, driver.id);
-    if (assignError) {
-      return { assigned: false, error: assignError };
-    }
-    return { assigned: true, error: null };
-  }
+// Group nearby rides into one batch, ordered by a nearest-neighbour route.
+async function assignBatch(
+  admin: AdminClient,
+  eventId: string,
+  driver: Driver,
+  rides: RideRequest[]
+): Promise<void> {
+  const totalPassengers = rides.reduce((sum, r) => sum + (r.passenger_count || 0), 0);
 
-  // Create batch
   const { data: batch, error: batchError } = await admin
     .from("ride_batches")
     .insert({
@@ -148,85 +129,197 @@ export async function autoAssignNextRide(
     .select()
     .single();
 
-  if (batchError || !batch) {
-    console.log(`[Batch Mode] Batch creation failed, falling back to single ride. Error: ${batchError?.message}`);
-    // Fallback to single ride
-    const { error: assignError } = await assignDriverToRide(firstRide.id, driver.id);
-    if (assignError) {
-      return { assigned: false, error: assignError };
-    }
-    return { assigned: true, error: null };
+  if (batchError || !batch) throw new Error(batchError?.message || "Failed to create batch");
+
+  const ordered = await orderStopsByNearestNeighbor(
+    driver.current_lat ?? 0,
+    driver.current_lng ?? 0,
+    rides.map((r) => ({ id: r.id, lat: r.pickup_lat, lng: r.pickup_lng }))
+  );
+
+  const etaByRideId = new Map(ordered.map((o) => [o.id, o.etaMinutes]));
+
+  const batchItems = ordered.map((stop) => ({
+    batch_id: batch.id,
+    ride_request_id: stop.id,
+    pickup_order_index: stop.order,
+    estimated_arrival_time:
+      stop.etaMinutes > 0
+        ? new Date(Date.now() + stop.etaMinutes * 60000).toISOString()
+        : null,
+    picked_up: false,
+  }));
+
+  const { error: itemsError } = await admin.from("ride_batch_items").insert(batchItems);
+  if (itemsError) {
+    // Don't leave an orphan batch behind.
+    await admin.from("ride_batches").delete().eq("id", batch.id);
+    throw new Error(itemsError.message);
   }
 
-  console.log(`[Batch Mode] Batch created successfully (ID: ${batch.id}). Assigning ${ridesToBatch.length} rides...`);
-
-  // Assign all rides in batch to driver AND create batch items
-  const batchItemsToCreate: any[] = [];
-  console.log(`[Batch Mode] Starting loop to assign ${ridesToBatch.length} rides...`);
-  for (let i = 0; i < ridesToBatch.length; i++) {
-    const ride = ridesToBatch[i];
-    console.log(`[Batch Mode] Loop iteration ${i+1}/${ridesToBatch.length}: Assigning ride ${ride.id} (${ride.rider_name})`);
-
-    // Update ride with batch assignment
-    const { error: assignError } = await admin
+  for (const stop of ordered) {
+    const { error } = await admin
       .from("ride_requests")
-      .update({ assigned_driver_id: driver.id, batch_id: batch.id, status: "assigned" })
-      .eq("id", ride.id);
-
-    if (assignError) {
-      console.error(`[Batch Mode] Error assigning ride ${ride.id}:`, assignError);
-    } else {
-      // Create batch item so driver can see this ride in batch
-      batchItemsToCreate.push({
+      .update({
+        assigned_driver_id: driver.id,
         batch_id: batch.id,
-        ride_request_id: ride.id,  // IMPORTANT: Column is ride_request_id, not ride_id
-        pickup_order_index: i,
-        picked_up: false,
-      });
-    }
+        status: "assigned",
+        pickup_sequence_index: stop.order,
+        driver_eta_minutes: etaByRideId.get(stop.id) ?? null,
+      })
+      .eq("id", stop.id);
+
+    if (error) throw new Error(error.message);
   }
 
-  // Create all batch items in one call
-  console.log(`[Batch Mode] Preparing to create ${batchItemsToCreate.length} batch items:`, batchItemsToCreate);
-  if (batchItemsToCreate.length > 0) {
-    const { data: insertedItems, error: itemsError } = await admin
-      .from("ride_batch_items")
-      .insert(batchItemsToCreate)
-      .select();
+  const { error: driverError } = await admin
+    .from("drivers")
+    .update({
+      current_status: "assigned",
+      current_passenger_load:
+        (driver.current_passenger_load || 0) + totalPassengers,
+    })
+    .eq("id", driver.id);
 
-    if (itemsError) {
-      console.error(`[Batch Mode] Error creating batch items:`, itemsError.message, itemsError);
-    } else {
-      console.log(`[Batch Mode] Successfully created ${batchItemsToCreate.length} batch items:`, insertedItems);
-    }
-  } else {
-    console.warn(`[Batch Mode] WARNING: No batch items to create! batchItemsToCreate is empty`);
-  }
-
-  // Update driver status
-  await admin.from("drivers").update({ current_status: "assigned" }).eq("id", driver.id);
-
-  console.log(`[Batch Mode] Batch assignment complete. Driver ${driver.id} assigned to batch ${batch.id}`);
-  return { assigned: true, error: null };
+  if (driverError) throw new Error(driverError.message);
 }
 
-// Auto-assign all possible rides (loop until no more matches)
+// Assign a specific waiting ride to a specific available driver (manual assign).
+export async function assignRideToDriver(
+  eventId: string,
+  rideId: string,
+  driverId: string
+): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const admin = createAdminClient();
+
+    const { data: ride, error: rideFetchError } = await admin
+      .from("ride_requests")
+      .select("*")
+      .eq("id", rideId)
+      .eq("event_id", eventId)
+      .maybeSingle();
+
+    if (rideFetchError) throw new Error(rideFetchError.message);
+    if (!ride) return { success: false, error: new Error("Ride not found") };
+    if (ride.status !== "waiting") {
+      return {
+        success: false,
+        error: new Error(`Cannot assign ride with status: ${ride.status}`),
+      };
+    }
+
+    const { data: driver, error: driverFetchError } = await admin
+      .from("drivers")
+      .select("*")
+      .eq("id", driverId)
+      .eq("event_id", eventId)
+      .maybeSingle();
+
+    if (driverFetchError) throw new Error(driverFetchError.message);
+    if (!driver) return { success: false, error: new Error("Driver not found") };
+    if (driver.current_status !== "available") {
+      return { success: false, error: new Error("Driver is not available") };
+    }
+
+    const capacity =
+      (driver.max_capacity || 4) - (driver.current_passenger_load || 0);
+    if ((ride.passenger_count || 1) > capacity) {
+      return {
+        success: false,
+        error: new Error(
+          `Ride needs ${ride.passenger_count} seats but driver only has ${capacity}`
+        ),
+      };
+    }
+
+    await assignSingleRide(admin, ride as RideRequest, driver as Driver);
+    return { success: true, error: null };
+  } catch (err) {
+    return { success: false, error: err as Error };
+  }
+}
+
+// Auto-assign: take the oldest waiting ride plus (in batch mode) any nearby
+// rides that still fit the driver, and hand them to the nearest free driver.
+export async function autoAssignNextRide(
+  eventId: string
+): Promise<{ assigned: boolean; error: Error | null }> {
+  try {
+    const admin = createAdminClient();
+
+    const { data: event, error: eventError } = await admin
+      .from("events")
+      .select("id, batch_mode_enabled")
+      .eq("id", eventId)
+      .maybeSingle();
+
+    if (eventError) throw new Error(eventError.message);
+    if (!event) return { assigned: false, error: new Error("Event not found") };
+
+    const waitingRides = await fetchWaitingRides(admin, eventId);
+    if (waitingRides.length === 0) return { assigned: false, error: null };
+
+    const availableDrivers = await fetchAvailableDrivers(admin, eventId);
+    if (availableDrivers.length === 0) return { assigned: false, error: null };
+
+    const firstRide = waitingRides[0];
+    const driver = pickNearestDriver(
+      availableDrivers,
+      firstRide.pickup_lat,
+      firstRide.pickup_lng
+    );
+    if (!driver) return { assigned: false, error: null };
+
+    if (!event.batch_mode_enabled) {
+      await assignSingleRide(admin, firstRide, driver);
+      return { assigned: true, error: null };
+    }
+
+    // Batch mode: pull in nearby rides while they still fit the vehicle.
+    const capacity = (driver.max_capacity || 4) - (driver.current_passenger_load || 0);
+    let passengerCount = 0;
+    const ridesToBatch: RideRequest[] = [];
+
+    for (const ride of waitingRides) {
+      const distance = haversineDistance(
+        firstRide.pickup_lat,
+        firstRide.pickup_lng,
+        ride.pickup_lat,
+        ride.pickup_lng
+      );
+      if (distance > BATCH_RADIUS_KM) continue;
+
+      const seats = ride.passenger_count || 1;
+      if (passengerCount + seats > capacity) continue;
+
+      ridesToBatch.push(ride);
+      passengerCount += seats;
+    }
+
+    if (ridesToBatch.length <= 1) {
+      await assignSingleRide(admin, firstRide, driver);
+      return { assigned: true, error: null };
+    }
+
+    await assignBatch(admin, eventId, driver, ridesToBatch);
+    return { assigned: true, error: null };
+  } catch (err) {
+    return { assigned: false, error: err as Error };
+  }
+}
+
+// Auto-assign everything that can be assigned right now.
 export async function autoAssignAllRides(
   eventId: string
 ): Promise<{ assignedCount: number; error: Error | null }> {
   let assignedCount = 0;
-  let keepGoing = true;
 
-  while (keepGoing) {
+  for (let i = 0; i < MAX_ASSIGN_ITERATIONS; i++) {
     const { assigned, error } = await autoAssignNextRide(eventId);
-    if (error) {
-      return { assignedCount, error };
-    }
-    if (assigned) {
-      assignedCount++;
-    } else {
-      keepGoing = false;
-    }
+    if (error) return { assignedCount, error };
+    if (!assigned) break;
+    assignedCount++;
   }
 
   return { assignedCount, error: null };

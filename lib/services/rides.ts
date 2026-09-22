@@ -203,14 +203,24 @@ export async function updateRideStatus(
   return { error: null };
 }
 
+// Riders are unauthenticated, so they must prove ownership of the ride by
+// reproducing its identifier (phone or client_id). Drivers/admins rely on
+// their session instead and can omit `identity`.
+export interface RideIdentity {
+  rider_phone?: string | null;
+  client_id?: string | null;
+}
+
 // Cancel ride request
 export async function cancelRideRequest(
-  requestId: string
+  requestId: string,
+  identity?: RideIdentity
 ): Promise<{ error: Error | null }> {
   try {
     const response = await fetch(`/api/rides/${requestId}/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(identity || {}),
     });
 
     if (!response.ok) {
@@ -276,13 +286,14 @@ export async function updateRideRequest(
     dropoff_address?: string;
     dropoff_lat?: number;
     dropoff_lng?: number;
-  }
+  },
+  identity?: RideIdentity
 ): Promise<{ data: RideRequest | null; error: Error | null }> {
   try {
     const response = await fetch(`/api/rides/${rideId}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updates),
+      body: JSON.stringify({ ...updates, ...(identity || {}) }),
     });
 
     if (!response.ok) {

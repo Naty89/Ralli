@@ -42,11 +42,7 @@ import {
   removeDriverFromEvent,
   updateDriverStatus,
 } from "@/lib/services/drivers";
-import {
-  dispatchAllRides,
-  transitionRideStatus,
-  assignDriverToRide,
-} from "@/lib/services/dispatchService";
+import { transitionRideStatus } from "@/lib/services/dispatchService";
 import { getEventAnalytics } from "@/lib/services/analyticsService";
 import { formatETA } from "@/lib/services/etaService";
 import {
@@ -111,21 +107,36 @@ export default function AdminEventPage() {
     };
   }, [eventId]);
 
-  // Auto-assign effect: runs when auto-assign is enabled and rides/drivers change
+  // Auto-assign effect: runs when auto-assign is enabled and there is actually
+  // something to match. Debounced and gated so realtime updates can't spin a
+  // dispatch -> reload -> dispatch loop.
   useEffect(() => {
-    if (autoAssign && !isAutoAssigning) {
+    if (!autoAssign || isAutoAssigning) return;
+
+    const hasWaiting = rides.some((r) => r.status === "waiting");
+    const hasFreeDriver = drivers.some((d) => d.current_status === "available");
+    if (!hasWaiting || !hasFreeDriver) return;
+
+    const timer = setTimeout(() => {
       runAutoAssign();
-    }
-  }, [autoAssign, rides, drivers]);
+    }, 750);
+
+    return () => clearTimeout(timer);
+  }, [autoAssign, rides, drivers, isAutoAssigning]);
 
   const runAutoAssign = async () => {
     setIsAutoAssigning(true);
     setDispatchError(null);
     try {
-      // Both batch and non-batch modes use dispatchAllRides
-      // Batch logic is handled server-side in rides-dispatch.ts based on batch_mode_enabled flag
-      const result = await dispatchAllRides(eventId);
-      if (result.error) setDispatchError(result.error.message);
+      // Dispatch (and batching) runs server-side so it bypasses RLS and uses
+      // the same code path as ride creation.
+      const res = await fetch("/api/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: eventId }),
+      });
+      const json = await res.json();
+      if (!res.ok) setDispatchError(json.error || "Dispatch failed");
     } catch (err) {
       setDispatchError(err instanceof Error ? err.message : "Dispatch failed");
     }
@@ -223,7 +234,13 @@ export default function AdminEventPage() {
   };
 
   const handleAssignDriver = async (rideId: string, driverId: string) => {
-    await assignDriverToRide(rideId, driverId);
+    const res = await fetch("/api/dispatch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: eventId, ride_id: rideId, driver_id: driverId }),
+    });
+    const json = await res.json();
+    if (!res.ok) setDispatchError(json.error || "Assignment failed");
     setSelectedRide(null);
     loadRides();
     loadDrivers();
@@ -731,7 +748,7 @@ export default function AdminEventPage() {
                 <Users className="h-8 w-8 text-dark-600 mx-auto mb-2" />
                 <p className="text-dark-400 text-sm">No drivers assigned</p>
                 <p className="text-dark-500 text-xs mt-1">
-                  Click "Add Driver" to assign drivers from your fraternity
+                  Click &quot;Add Driver&quot; to assign drivers from your fraternity
                 </p>
               </Card>
             ) : (

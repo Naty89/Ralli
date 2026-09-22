@@ -30,60 +30,43 @@ export async function validateOrganizationCode(
   return { valid: true, fraternityName: data.fraternity_name };
 }
 
-// Sign up for admins (generates organization code)
+// Sign up for admins (generates organization code).
+// Runs through a server route so the signup code check cannot be bypassed
+// from the browser, and so the profile is created with the service role.
 export async function signUpAdmin(
   email: string,
   password: string,
   fullName: string,
-  fraternityName: string
+  fraternityName: string,
+  signupCode?: string
 ): Promise<{ data: any; organizationCode: string | null; error: Error | null }> {
-  // Create auth user
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        fraternity_name: fraternityName,
-        role: "admin",
-      },
-    },
-  });
+  try {
+    const res = await fetch("/api/admin/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password,
+        fullName,
+        fraternityName,
+        signupCode: signupCode ?? "",
+      }),
+    });
 
-  if (authError) {
-    return { data: null, organizationCode: null, error: new Error(authError.message) };
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return {
+        data: null,
+        organizationCode: null,
+        error: new Error(json.error ?? "Failed to create admin account"),
+      };
+    }
+
+    return { data: json, organizationCode: json.organizationCode ?? null, error: null };
+  } catch (err) {
+    return { data: null, organizationCode: null, error: err as Error };
   }
-
-  if (!authData.user) {
-    return { data: null, organizationCode: null, error: new Error("Failed to create user") };
-  }
-
-  // Check if email confirmation is required
-  if (!authData.session) {
-    return {
-      data: authData,
-      organizationCode: null,
-      error: new Error("Please check your email to confirm your account before signing in.")
-    };
-  }
-
-  // Generate unique organization code
-  const organizationCode = generateOrganizationCode();
-
-  // Create profile with organization code
-  const { error: profileError } = await supabase.from("profiles").insert({
-    id: authData.user.id,
-    full_name: fullName,
-    fraternity_name: fraternityName,
-    role: "admin",
-    organization_code: organizationCode,
-  } as any);
-
-  if (profileError) {
-    return { data: null, organizationCode: null, error: new Error(profileError.message) };
-  }
-
-  return { data: authData, organizationCode, error: null };
 }
 
 // Sign up for drivers (requires organization code)

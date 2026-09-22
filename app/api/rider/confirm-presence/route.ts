@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { authorizeRideMutation } from "@/lib/services/rideAccess";
 import { createAdminClient } from "@/lib/supabaseServer";
 
 // Riders are not authenticated. RLS only allows admins/drivers to UPDATE ride_requests.
 // This route uses the service role to perform the confirm-presence update so riders
-// can press "I'm Here" and transition the ride to in_progress.
+// can press "I'm Here" and transition the ride to in_progress. Callers must prove
+// they own the ride (phone/client_id) or be the assigned driver / owning admin.
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +16,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { success: false, error: "Missing rideId" },
         { status: 400 }
+      );
+    }
+
+    const auth = await authorizeRideMutation(request, rideId, {
+      rider_phone: body?.rider_phone ?? null,
+      client_id: body?.client_id ?? null,
+    });
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
 

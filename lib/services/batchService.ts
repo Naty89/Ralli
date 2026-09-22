@@ -7,8 +7,7 @@ import {
   RideCluster,
   BatchStatus,
 } from "@/types/database";
-import { haversineDistance } from "./dispatchService";
-import { calculateETA } from "./etaService";
+import { haversineDistance, orderStopsByNearestNeighbor } from "./geo";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
 // Constants
@@ -122,69 +121,17 @@ export async function calculatePickupOrder(
   driverLng: number,
   rides: Array<{ id: string; pickup_lat: number; pickup_lng: number }>
 ): Promise<Array<{ ride_id: string; order: number; eta_minutes: number }>> {
-  if (rides.length === 0) return [];
-  if (rides.length === 1) {
-    const eta = await calculateETA(
-      driverLat,
-      driverLng,
-      rides[0].pickup_lat,
-      rides[0].pickup_lng
-    );
-    return [{ ride_id: rides[0].id, order: 0, eta_minutes: eta.etaMinutes }];
-  }
+  const ordered = await orderStopsByNearestNeighbor(
+    driverLat,
+    driverLng,
+    rides.map((r) => ({ id: r.id, lat: r.pickup_lat, lng: r.pickup_lng }))
+  );
 
-  const result: Array<{ ride_id: string; order: number; eta_minutes: number }> =
-    [];
-  const remaining = [...rides];
-  let currentLat = driverLat;
-  let currentLng = driverLng;
-  let cumulativeTime = 0;
-  let order = 0;
-
-  while (remaining.length > 0) {
-    // Find nearest unvisited pickup
-    let nearestIdx = 0;
-    let nearestDistance = Infinity;
-
-    for (let i = 0; i < remaining.length; i++) {
-      const dist = haversineDistance(
-        currentLat,
-        currentLng,
-        remaining[i].pickup_lat,
-        remaining[i].pickup_lng
-      );
-      if (dist < nearestDistance) {
-        nearestDistance = dist;
-        nearestIdx = i;
-      }
-    }
-
-    // Calculate ETA to this pickup
-    const eta = await calculateETA(
-      currentLat,
-      currentLng,
-      remaining[nearestIdx].pickup_lat,
-      remaining[nearestIdx].pickup_lng
-    );
-
-    cumulativeTime += eta.etaMinutes;
-
-    result.push({
-      ride_id: remaining[nearestIdx].id,
-      order: order,
-      eta_minutes: cumulativeTime,
-    });
-
-    // Move to this pickup location
-    currentLat = remaining[nearestIdx].pickup_lat;
-    currentLng = remaining[nearestIdx].pickup_lng;
-
-    // Remove from remaining
-    remaining.splice(nearestIdx, 1);
-    order++;
-  }
-
-  return result;
+  return ordered.map((stop) => ({
+    ride_id: stop.id,
+    order: stop.order,
+    eta_minutes: stop.etaMinutes,
+  }));
 }
 
 // Create a batch with multiple rides

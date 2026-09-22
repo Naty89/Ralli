@@ -283,7 +283,7 @@ export default function DriverDashboardPage() {
           <Car className="h-12 w-12 text-dark-600 mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Not Assigned to Event</h2>
           <p className="text-dark-400 mb-6">
-            You haven't been assigned to any active event yet. Please contact your admin.
+            You haven&apos;t been assigned to any active event yet. Please contact your admin.
           </p>
           <Button variant="secondary" onClick={handleSignOut}>
             Sign Out
@@ -561,7 +561,7 @@ export default function DriverDashboardPage() {
             </div>
             <h3 className="font-medium text-dark-300">Waiting for Assignment</h3>
             <p className="text-dark-500 text-sm mt-1">
-              You'll be notified when you're assigned a ride
+              You&apos;ll be notified when you&apos;re assigned a ride
             </p>
           </Card>
         )}
@@ -570,7 +570,7 @@ export default function DriverDashboardPage() {
         {driver.current_status === "offline" && (
           <Card className="text-center py-12">
             <Power className="h-12 w-12 text-dark-600 mx-auto mb-4" />
-            <h3 className="font-medium text-dark-300">You're Offline</h3>
+            <h3 className="font-medium text-dark-300">You&apos;re Offline</h3>
             <p className="text-dark-500 text-sm mt-1">
               Tap the power button above to go online
             </p>

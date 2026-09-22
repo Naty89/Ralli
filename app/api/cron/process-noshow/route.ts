@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabaseServer";
+import { checkServiceSecret } from "@/lib/services/rideAccess";
 import {
   getExpiredNoShowRides,
   processNoShow,
 } from "@/lib/services/safetyService";
 
-// This endpoint should be called periodically (e.g., every 30 seconds)
-// Can be triggered by:
-// - Vercel Cron Jobs
-// - Supabase Edge Functions
-// - External cron service
-// - Manual trigger for testing
+// This endpoint should be called periodically (e.g., every minute).
+// Scheduled by Vercel Cron (see vercel.json), which sends
+// `Authorization: Bearer $CRON_SECRET`.
 
-export async function GET() {
+async function run() {
   try {
+    // Service role: RLS does not allow anonymous updates to ride_requests.
+    const admin = createAdminClient();
+
     // Get all rides that have exceeded their no-show deadline
-    const { data: expiredRides, error: fetchError } = await getExpiredNoShowRides();
+    const { data: expiredRides, error: fetchError } =
+      await getExpiredNoShowRides(admin);
 
     if (fetchError) {
       console.error("Failed to fetch expired rides:", fetchError);
@@ -35,11 +38,19 @@ export async function GET() {
     // Process each expired ride
     const results = [];
     for (const ride of expiredRides) {
+      const { data: rideRow } = await admin
+        .from("ride_requests")
+        .select("passenger_count")
+        .eq("id", ride.ride_id)
+        .maybeSingle();
+
       const { success, error } = await processNoShow(
         ride.ride_id,
         ride.event_id,
         ride.rider_identifier_hash,
-        ride.assigned_driver_id
+        ride.assigned_driver_id,
+        admin,
+        rideRow?.passenger_count || 0
       );
 
       results.push({
@@ -72,7 +83,17 @@ export async function GET() {
   }
 }
 
+export async function GET(request: Request) {
+  if (!checkServiceSecret(request, "CRON_SECRET")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return run();
+}
+
 // Also allow POST for flexibility
-export async function POST() {
-  return GET();
+export async function POST(request: Request) {
+  if (!checkServiceSecret(request, "CRON_SECRET")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return run();
 }

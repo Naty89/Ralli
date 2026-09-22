@@ -21,6 +21,7 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [fraternityName, setFraternityName] = useState("");
+  const [signupCode, setSignupCode] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +34,8 @@ export default function AdminLoginPage() {
           email,
           password,
           fullName,
-          fraternityName
+          fraternityName,
+          signupCode
         );
         if (error) {
           setError(error.message);
@@ -148,6 +150,14 @@ export default function AdminLoginPage() {
                 value={fraternityName}
                 onChange={(e) => setFraternityName(e.target.value)}
                 placeholder="Alpha Beta Gamma"
+                required
+              />
+              <Input
+                label="Admin Signup Code"
+                type="password"
+                value={signupCode}
+                onChange={(e) => setSignupCode(e.target.value)}
+                placeholder="Provided by Ralli"
                 required
               />
             </>

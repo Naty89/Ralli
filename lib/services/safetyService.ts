@@ -36,14 +36,15 @@ export async function setArrivalDeadline(
 // Riders are unauthenticated, so RLS blocks direct updates. Use the API route
 // (service role) when in the browser so the update succeeds.
 export async function confirmRiderPresence(
-  rideId: string
+  rideId: string,
+  identity?: { rider_phone?: string | null; client_id?: string | null }
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
     if (typeof window !== "undefined") {
       const res = await fetch("/api/rider/confirm-presence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rideId }),
+        body: JSON.stringify({ rideId, ...identity }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -75,8 +76,12 @@ export async function confirmRiderPresence(
   }
 }
 
-// Get rides that have expired their no-show deadline
-export async function getExpiredNoShowRides(): Promise<{
+// Get rides that have expired their no-show deadline.
+// `client` is injectable so the cron job can pass a service-role client
+// (anonymous RLS policies do not allow updating ride_requests).
+export async function getExpiredNoShowRides(
+  client: any = supabase
+): Promise<{
   data: Array<{
     ride_id: string;
     event_id: string;
@@ -88,7 +93,7 @@ export async function getExpiredNoShowRides(): Promise<{
   try {
     const now = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from("ride_requests")
       .select("id, event_id, rider_identifier_hash, assigned_driver_id")
       .eq("status", "arrived")
@@ -101,7 +106,7 @@ export async function getExpiredNoShowRides(): Promise<{
     }
 
     return {
-      data: (data || []).map((r) => ({
+      data: (data || []).map((r: any) => ({
         ride_id: r.id,
         event_id: r.event_id,
         rider_identifier_hash: r.rider_identifier_hash,
@@ -119,11 +124,13 @@ export async function processNoShow(
   rideId: string,
   eventId: string,
   riderIdentifierHash: string | null,
-  driverId: string | null
+  driverId: string | null,
+  client: any = supabase,
+  passengerCount: number = 0
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
     // Update ride status to no_show
-    const { error: rideError } = await supabase
+    const { error: rideError } = await client
       .from("ride_requests")
       .update({ status: "no_show" })
       .eq("id", rideId);
@@ -132,11 +139,23 @@ export async function processNoShow(
       return { success: false, error: new Error(rideError.message) };
     }
 
-    // Free the driver
+    // Free the driver and release the seats they were holding
     if (driverId) {
-      const { error: driverError } = await supabase
+      const { data: driver } = await client
         .from("drivers")
-        .update({ current_status: "available" })
+        .select("id, current_passenger_load")
+        .eq("id", driverId)
+        .maybeSingle();
+
+      const { error: driverError } = await client
+        .from("drivers")
+        .update({
+          current_status: "available",
+          current_passenger_load: Math.max(
+            0,
+            (driver?.current_passenger_load || 0) - passengerCount
+          ),
+        })
         .eq("id", driverId);
 
       if (driverError) {
@@ -146,7 +165,7 @@ export async function processNoShow(
 
     // Increment penalty count if we have a rider identifier
     if (riderIdentifierHash) {
-      await incrementNoShowCount(eventId, riderIdentifierHash);
+      await incrementNoShowCount(eventId, riderIdentifierHash, client);
     }
 
     return { success: true, error: null };
@@ -208,11 +227,12 @@ export async function getCooldownStatus(
 // Increment no-show count and apply cooldown if threshold reached
 export async function incrementNoShowCount(
   eventId: string,
-  riderIdentifierHash: string
+  riderIdentifierHash: string,
+  client: any = supabase
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
     // First, try to get existing record
-    const { data: existing } = await supabase
+    const { data: existing } = await client
       .from("rider_penalties")
       .select("id, no_show_count")
       .eq("event_id", eventId)
@@ -234,7 +254,7 @@ export async function incrementNoShowCount(
         updates.no_show_count = 0; // Reset count after cooldown applied
       }
 
-      const { error } = await supabase
+      const { error } = await client
         .from("rider_penalties")
         .update(updates)
         .eq("id", existing.id);
@@ -244,7 +264,7 @@ export async function incrementNoShowCount(
       }
     } else {
       // Insert new record
-      const { error } = await supabase.from("rider_penalties").insert({
+      const { error } = await client.from("rider_penalties").insert({
         event_id: eventId,
         rider_identifier_hash: riderIdentifierHash,
         no_show_count: 1,

@@ -1,104 +1,14 @@
 import { supabase } from "@/lib/supabaseClient";
-import { haversineDistance } from "./dispatchService";
+import { calculateETA as calculateETAPure, type ETAResult } from "./geo";
 
-// Average speed assumptions (km/h)
-const AVERAGE_SPEED_KMH = 30; // Urban driving average
-const MIN_ETA_MINUTES = 2;
-const MAX_ETA_MINUTES = 60;
-
-interface ETAResult {
-  etaMinutes: number;
-  distanceKm: number;
-  source: "google_maps" | "fallback";
-}
-
-// Calculate ETA using Google Maps Distance Matrix API
-async function getGoogleMapsETA(
-  originLat: number,
-  originLng: number,
-  destLat: number,
-  destLng: number
-): Promise<ETAResult | null> {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-
-  if (!apiKey) {
-    return null;
-  }
-
-  try {
-    const url = new URL("https://maps.googleapis.com/maps/api/distancematrix/json");
-    url.searchParams.set("origins", `${originLat},${originLng}`);
-    url.searchParams.set("destinations", `${destLat},${destLng}`);
-    url.searchParams.set("mode", "driving");
-    url.searchParams.set("key", apiKey);
-
-    const response = await fetch(url.toString());
-    const data = await response.json();
-
-    if (data.status === "OK" && data.rows?.[0]?.elements?.[0]?.status === "OK") {
-      const element = data.rows[0].elements[0];
-      const durationSeconds = element.duration.value;
-      const distanceMeters = element.distance.value;
-
-      return {
-        etaMinutes: Math.ceil(durationSeconds / 60),
-        distanceKm: distanceMeters / 1000,
-        source: "google_maps",
-      };
-    }
-  } catch (error) {
-    console.error("Google Maps API error:", error);
-  }
-
-  return null;
-}
-
-// Fallback ETA calculation using Haversine distance
-function getFallbackETA(
-  originLat: number,
-  originLng: number,
-  destLat: number,
-  destLng: number
-): ETAResult {
-  const distanceKm = haversineDistance(originLat, originLng, destLat, destLng);
-
-  // Calculate time based on average speed
-  // Add 20% buffer for traffic/stops
-  const rawMinutes = (distanceKm / AVERAGE_SPEED_KMH) * 60 * 1.2;
-
-  const etaMinutes = Math.max(
-    MIN_ETA_MINUTES,
-    Math.min(MAX_ETA_MINUTES, Math.ceil(rawMinutes))
-  );
-
-  return {
-    etaMinutes,
-    distanceKm,
-    source: "fallback",
-  };
-}
-
-// Main ETA calculation function
+// Main ETA calculation function (delegates to the shared, client-free helper)
 export async function calculateETA(
   driverLat: number,
   driverLng: number,
   pickupLat: number,
   pickupLng: number
 ): Promise<ETAResult> {
-  // Try Google Maps first
-  const googleResult = await getGoogleMapsETA(
-    driverLat,
-    driverLng,
-    pickupLat,
-    pickupLng
-  );
-
-  if (googleResult) {
-    return googleResult;
-  }
-
-  // Fallback to distance-based calculation
-  return getFallbackETA(driverLat, driverLng, pickupLat, pickupLng);
+  return calculateETAPure(driverLat, driverLng, pickupLat, pickupLng);
 }
 
 // Update ETA for a specific ride

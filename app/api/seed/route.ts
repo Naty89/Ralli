@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { checkServiceSecret } from "@/lib/services/rideAccess";
 
 // Use service role for seeding (bypasses RLS)
 const supabaseAdmin = createClient(
@@ -7,6 +8,19 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
+
+// Seeding creates real users with well-known credentials. It previously ran
+// with no authentication at all, which let anyone create an admin account
+// (admin@test.com / password123) in the production database. Never expose it.
+function assertAuthorized(request: Request) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (!checkServiceSecret(request, "SEED_SECRET")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return null;
+}
 
 // Helper to create or get existing user
 async function getOrCreateUser(email: string, password: string) {
@@ -36,7 +50,10 @@ async function getOrCreateUser(email: string, password: string) {
   return null;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const unauthorized = assertAuthorized(request);
+  if (unauthorized) return unauthorized;
+
   try {
 
     // Create test admin user
@@ -179,17 +196,11 @@ export async function POST() {
 }
 
 // GET endpoint to check seed status
-export async function GET() {
+export async function GET(request: Request) {
+  const unauthorized = assertAuthorized(request);
+  if (unauthorized) return unauthorized;
+
   return NextResponse.json({
     message: "POST to this endpoint to seed test data",
-    credentials: {
-      admin: { email: "admin@test.com", password: "password123" },
-      drivers: [
-        { email: "driver1@test.com", password: "password123" },
-        { email: "driver2@test.com", password: "password123" },
-        { email: "driver3@test.com", password: "password123" },
-      ],
-      event: { accessCode: "TEST01" },
-    },
   });
 }

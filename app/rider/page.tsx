@@ -289,7 +289,10 @@ function RiderContent() {
     if (!rideRequest) return;
 
     setIsConfirming(true);
-    const { success, error } = await confirmRiderPresence(rideRequest.id);
+    const { success, error } = await confirmRiderPresence(rideRequest.id, {
+      rider_phone: rideRequest.rider_phone,
+      client_id: clientId,
+    });
 
     if (success) {
       // Ride will transition to in_progress via realtime subscription
@@ -322,7 +325,10 @@ function RiderContent() {
     }
 
     setIsConfirming(true);
-    const { error } = await cancelRideRequest(rideRequest.id);
+    const { error } = await cancelRideRequest(rideRequest.id, {
+      rider_phone: rideRequest.rider_phone,
+      client_id: clientId,
+    });
 
     if (error) {
       setError("Failed to cancel ride");
@@ -480,6 +486,10 @@ function RiderContent() {
           dropoff_lat: dropoffLat,
           dropoff_lng: dropoffLng,
         }),
+      },
+      {
+        rider_phone: rideRequest.rider_phone,
+        client_id: clientId,
       });
 
       if (error) {

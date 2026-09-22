@@ -1,32 +1,9 @@
 import { supabase } from "@/lib/supabaseClient";
 import { Driver, RideRequest, RideStatus, VALID_RIDE_TRANSITIONS } from "@/types/database";
 import { NO_SHOW_TIMER_MINUTES } from "./safetyService";
+import { haversineDistance } from "./geo";
 
-// Haversine formula to calculate distance between two points in km
-export function haversineDistance(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number
-): number {
-  const R = 6371; // Earth's radius in kilometers
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function toRad(deg: number): number {
-  return deg * (Math.PI / 180);
-}
+export { haversineDistance };
 
 // Find the nearest available driver for a pickup location.
 // If no drivers have location yet (e.g. desktop or geolocation pending), fall back to first available driver.
@@ -163,73 +140,10 @@ export async function assignDriverToRide(
   return { success: true, error: null };
 }
 
-// Smart dispatch: Find nearest driver and assign to oldest waiting ride
-export async function smartDispatch(
-  eventId: string
-): Promise<{
-  assigned: boolean;
-  rideId?: string;
-  driverId?: string;
-  distance?: number;
-  error: Error | null;
-}> {
-  // Get oldest waiting ride
-  const ride = await getOldestWaitingRide(eventId);
-  if (!ride) {
-    return { assigned: false, error: null }; // No waiting rides
-  }
-
-  // Find nearest available driver
-  const { driver, distance } = await findNearestDriver(
-    eventId,
-    ride.pickup_lat,
-    ride.pickup_lng
-  );
-
-  if (!driver) {
-    return { assigned: false, error: null }; // No available drivers
-  }
-
-  // Calculate ETA (rough estimate: assume 30 km/h average speed)
-  const etaMinutes = distance ? Math.ceil((distance / 30) * 60) : undefined;
-
-  // Assign the driver
-  const { success, error } = await assignDriverToRide(ride.id, driver.id, etaMinutes);
-
-  if (!success) {
-    return { assigned: false, error };
-  }
-
-  return {
-    assigned: true,
-    rideId: ride.id,
-    driverId: driver.id,
-    distance: distance ?? undefined,
-    error: null,
-  };
-}
-
-// Dispatch all possible rides (loop until no more matches)
-export async function dispatchAllRides(
-  eventId: string
-): Promise<{ assignedCount: number; error: Error | null }> {
-  let assignedCount = 0;
-  let keepGoing = true;
-
-  while (keepGoing) {
-    const { assigned, error } = await smartDispatch(eventId);
-    if (error) {
-      return { assignedCount, error };
-    }
-    if (assigned) {
-      assignedCount++;
-    } else {
-      keepGoing = false;
-    }
-  }
-
-  return { assignedCount, error: null };
-}
+// NOTE: Auto/batch dispatching lives in `rides-dispatch.ts` and runs
+// server-side (admin client) so it bypasses RLS. Do not re-introduce a
+// client-side dispatch loop here - it would silently diverge from the
+// server logic (no batching, no ETA, no passenger-load accounting).
 
 // Update ride status with state machine validation
 export async function transitionRideStatus(
