@@ -69,12 +69,66 @@ export function pickNearestDriver(
   return nearest ?? drivers[0];
 }
 
-// Assign one ride to one driver and reflect it on the driver record.
+// Atomically claim a driver.
+//
+// The update is conditional on the driver still being "available", so if two
+// dispatch loops run at the same time (ride creation fires dispatch in the
+// background, and bursts produce many overlapping calls) only one can win.
+// Postgres applies the WHERE clause under lock, which makes this a
+// compare-and-set rather than a read-then-write.
+// Returns false when another loop claimed the driver first.
+async function claimDriver(
+  admin: AdminClient,
+  driver: Driver,
+  extraPassengers: number
+): Promise<boolean> {
+  const { data, error } = await admin
+    .from("drivers")
+    .update({
+      current_status: "assigned",
+      current_passenger_load: (driver.current_passenger_load || 0) + extraPassengers,
+    })
+    .eq("id", driver.id)
+    .eq("current_status", "available")
+    .select("id")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return !!data;
+}
+
+// Give a claimed driver back, undoing the seat reservation.
+async function releaseDriver(
+  admin: AdminClient,
+  driverId: string,
+  seats: number
+): Promise<void> {
+  const { data } = await admin
+    .from("drivers")
+    .select("current_passenger_load")
+    .eq("id", driverId)
+    .maybeSingle();
+
+  await admin
+    .from("drivers")
+    .update({
+      current_status: "available",
+      current_passenger_load: Math.max(0, (data?.current_passenger_load || 0) - seats),
+    })
+    .eq("id", driverId);
+}
+
+// Assign one ride to one driver. Returns false if the driver was claimed by
+// another dispatch loop first.
 export async function assignSingleRide(
   admin: AdminClient,
   ride: RideRequest,
   driver: Driver
-): Promise<void> {
+): Promise<boolean> {
+  const seats = ride.passenger_count || 0;
+
+  if (!(await claimDriver(admin, driver, seats))) return false;
+
   let etaMinutes: number | undefined;
 
   if (driver.current_lat != null && driver.current_lng != null) {
@@ -96,27 +150,26 @@ export async function assignSingleRide(
     })
     .eq("id", ride.id);
 
-  if (rideError) throw new Error(rideError.message);
+  if (rideError) {
+    await releaseDriver(admin, driver.id, seats);
+    throw new Error(rideError.message);
+  }
 
-  const { error: driverError } = await admin
-    .from("drivers")
-    .update({
-      current_status: "assigned",
-      current_passenger_load: (driver.current_passenger_load || 0) + ride.passenger_count,
-    })
-    .eq("id", driver.id);
-
-  if (driverError) throw new Error(driverError.message);
+  return true;
 }
 
 // Group nearby rides into one batch, ordered by a nearest-neighbour route.
+// Returns false if the driver was claimed by another dispatch loop first.
 async function assignBatch(
   admin: AdminClient,
   eventId: string,
   driver: Driver,
   rides: RideRequest[]
-): Promise<void> {
+): Promise<boolean> {
   const totalPassengers = rides.reduce((sum, r) => sum + (r.passenger_count || 0), 0);
+
+  // Claim before writing any rides, so a lost race leaves nothing to undo.
+  if (!(await claimDriver(admin, driver, totalPassengers))) return false;
 
   const { data: batch, error: batchError } = await admin
     .from("ride_batches")
@@ -129,59 +182,58 @@ async function assignBatch(
     .select()
     .single();
 
-  if (batchError || !batch) throw new Error(batchError?.message || "Failed to create batch");
+  let batchId: string | null = batch?.id ?? null;
 
-  const ordered = await orderStopsByNearestNeighbor(
-    driver.current_lat ?? 0,
-    driver.current_lng ?? 0,
-    rides.map((r) => ({ id: r.id, lat: r.pickup_lat, lng: r.pickup_lng }))
-  );
+  try {
+    if (batchError || !batch) throw new Error(batchError?.message || "Failed to create batch");
 
-  const etaByRideId = new Map(ordered.map((o) => [o.id, o.etaMinutes]));
+    const ordered = await orderStopsByNearestNeighbor(
+      driver.current_lat ?? 0,
+      driver.current_lng ?? 0,
+      rides.map((r) => ({ id: r.id, lat: r.pickup_lat, lng: r.pickup_lng }))
+    );
 
-  const batchItems = ordered.map((stop) => ({
-    batch_id: batch.id,
-    ride_request_id: stop.id,
-    pickup_order_index: stop.order,
-    estimated_arrival_time:
-      stop.etaMinutes > 0
-        ? new Date(Date.now() + stop.etaMinutes * 60000).toISOString()
-        : null,
-    picked_up: false,
-  }));
+    const etaByRideId = new Map(ordered.map((o) => [o.id, o.etaMinutes]));
 
-  const { error: itemsError } = await admin.from("ride_batch_items").insert(batchItems);
-  if (itemsError) {
-    // Don't leave an orphan batch behind.
-    await admin.from("ride_batches").delete().eq("id", batch.id);
-    throw new Error(itemsError.message);
+    const batchItems = ordered.map((stop) => ({
+      batch_id: batch.id,
+      ride_request_id: stop.id,
+      pickup_order_index: stop.order,
+      estimated_arrival_time:
+        stop.etaMinutes > 0
+          ? new Date(Date.now() + stop.etaMinutes * 60000).toISOString()
+          : null,
+      picked_up: false,
+    }));
+
+    const { error: itemsError } = await admin.from("ride_batch_items").insert(batchItems);
+    if (itemsError) throw new Error(itemsError.message);
+
+    for (const stop of ordered) {
+      const { error } = await admin
+        .from("ride_requests")
+        .update({
+          assigned_driver_id: driver.id,
+          batch_id: batch.id,
+          status: "assigned",
+          pickup_sequence_index: stop.order,
+          driver_eta_minutes: etaByRideId.get(stop.id) ?? null,
+        })
+        .eq("id", stop.id);
+
+      if (error) throw new Error(error.message);
+    }
+  } catch (err) {
+    // Undo the partial batch and hand the driver back.
+    if (batchId) {
+      await admin.from("ride_batch_items").delete().eq("batch_id", batchId);
+      await admin.from("ride_batches").delete().eq("id", batchId);
+    }
+    await releaseDriver(admin, driver.id, totalPassengers);
+    throw err;
   }
 
-  for (const stop of ordered) {
-    const { error } = await admin
-      .from("ride_requests")
-      .update({
-        assigned_driver_id: driver.id,
-        batch_id: batch.id,
-        status: "assigned",
-        pickup_sequence_index: stop.order,
-        driver_eta_minutes: etaByRideId.get(stop.id) ?? null,
-      })
-      .eq("id", stop.id);
-
-    if (error) throw new Error(error.message);
-  }
-
-  const { error: driverError } = await admin
-    .from("drivers")
-    .update({
-      current_status: "assigned",
-      current_passenger_load:
-        (driver.current_passenger_load || 0) + totalPassengers,
-    })
-    .eq("id", driver.id);
-
-  if (driverError) throw new Error(driverError.message);
+  return true;
 }
 
 // Assign a specific waiting ride to a specific available driver (manual assign).
@@ -233,7 +285,13 @@ export async function assignRideToDriver(
       };
     }
 
-    await assignSingleRide(admin, ride as RideRequest, driver as Driver);
+    const won = await assignSingleRide(admin, ride as RideRequest, driver as Driver);
+    if (!won) {
+      return {
+        success: false,
+        error: new Error("That driver was just assigned to another ride"),
+      };
+    }
     return { success: true, error: null };
   } catch (err) {
     return { success: false, error: err as Error };
@@ -244,7 +302,7 @@ export async function assignRideToDriver(
 // rides that still fit the driver, and hand them to the nearest free driver.
 export async function autoAssignNextRide(
   eventId: string
-): Promise<{ assigned: boolean; error: Error | null }> {
+): Promise<{ assigned: boolean; contested?: boolean; error: Error | null }> {
   try {
     const admin = createAdminClient();
 
@@ -272,8 +330,8 @@ export async function autoAssignNextRide(
     if (!driver) return { assigned: false, error: null };
 
     if (!event.batch_mode_enabled) {
-      await assignSingleRide(admin, firstRide, driver);
-      return { assigned: true, error: null };
+      const won = await assignSingleRide(admin, firstRide, driver);
+      return { assigned: won, contested: !won, error: null };
     }
 
     // Batch mode: pull in nearby rides while they still fit the vehicle.
@@ -298,12 +356,12 @@ export async function autoAssignNextRide(
     }
 
     if (ridesToBatch.length <= 1) {
-      await assignSingleRide(admin, firstRide, driver);
-      return { assigned: true, error: null };
+      const won = await assignSingleRide(admin, firstRide, driver);
+      return { assigned: won, contested: !won, error: null };
     }
 
-    await assignBatch(admin, eventId, driver, ridesToBatch);
-    return { assigned: true, error: null };
+    const won = await assignBatch(admin, eventId, driver, ridesToBatch);
+    return { assigned: won, contested: !won, error: null };
   } catch (err) {
     return { assigned: false, error: err as Error };
   }
@@ -316,10 +374,15 @@ export async function autoAssignAllRides(
   let assignedCount = 0;
 
   for (let i = 0; i < MAX_ASSIGN_ITERATIONS; i++) {
-    const { assigned, error } = await autoAssignNextRide(eventId);
+    const { assigned, contested, error } = await autoAssignNextRide(eventId);
     if (error) return { assignedCount, error };
-    if (!assigned) break;
-    assignedCount++;
+    if (assigned) {
+      assignedCount++;
+      continue;
+    }
+    // Lost a driver to a concurrent dispatch loop: try the next one rather
+    // than giving up, so overlapping bursts still clear the queue.
+    if (!contested) break;
   }
 
   return { assignedCount, error: null };
