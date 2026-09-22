@@ -62,31 +62,42 @@ That single defect made everything else possible:
 |---|---|---|
 | `profiles` | blocked | works |
 | `drivers` | blocked | works |
+| `events` | blocked | works |
+| `ride_requests` | blocked | works |
 | `rider_penalties` | blocked | service role only |
 | `rider_consents` | blocked | service role only |
 | `rider_rate_limits` | blocked | service role only |
-| `events` | **still readable** | works |
-| `ride_requests` | **still readable** | works |
 
-Organization codes can no longer be harvested, so step 1 of the attack is
-closed. Driver self-signup still only requires an org code, but those codes
-are no longer public.
+No table is readable with the anonymous key. Organization codes can no longer
+be harvested, so step 1 of the attack is closed.
+
+Note on the migration history: the public `SELECT` policies on `events` and
+`ride_requests` were named `Enable select for all` and `Anyone can read
+events` in the live project, not the names in `schema.sql`. `DROP POLICY IF
+EXISTS` with the schema.sql names was therefore a silent no-op. They were
+eventually removed through the dashboard Policies UI.
 
 ---
 
 # Remaining work
 
-## 1. `ride_requests` and `events` are still world-readable  ← highest priority
+## 1. ~~`ride_requests` and `events` are world-readable~~ — done
 
-`ride_requests` carries every rider's **name, phone number and pickup address**
-for the duration of an event. Anyone with the anon key can download all of it
-with a single request. This is the last significant exposure.
+These carried every rider's **name, phone number and pickup address**.
+Both are now closed. The rider screen no longer reads them directly:
 
-They cannot simply be locked down, because the rider UI reads them directly
-with the browser client, and Supabase Realtime enforces RLS — so removing
-anonymous `SELECT` breaks live ride tracking for riders.
+- event lookup goes through `GET /api/events/lookup?code=`
+- ride status goes through `GET /api/rides/[id]`
+- consent is recorded via `POST /api/rider/consent`
+- consent state and cooldown are returned by `GET /api/rides`
+- the rider screen polls every 5s instead of using Supabase Realtime, which
+  enforces RLS and so cannot serve unauthenticated riders
 
-### Required changes
+Ride creation still works because `POST /api/rides` uses the service role;
+the anonymous `INSERT` policy on `ride_requests` was removed, which also
+closes a bypass of the start-time window, rate limiting and idempotency.
+
+### Implementation notes
 
 **a. `GET /api/events/lookup?code=XXXX`** (service role)
 Return only what the rider form needs: `id`, `event_name`, `start_time`,
