@@ -28,13 +28,11 @@ import { EmergencyButton } from "@/components/EmergencyButton";
 import { CooldownNotice } from "@/components/CooldownNotice";
 import { BatchPosition } from "@/components/BatchPickupList";
 import { getEventByAccessCode } from "@/lib/services/events";
-import { getRideRequestById, getQueuePosition, subscribeToRideRequest, cancelRideRequest, updateRideRequest } from "@/lib/services/rides";
-import { subscribeToDriver } from "@/lib/services/drivers";
+import { getRideRequestById, cancelRideRequest, updateRideRequest } from "@/lib/services/rides";
 import { formatETA } from "@/lib/services/etaService";
-import { checkConsent, recordConsent } from "@/lib/services/consentService";
-import { getCooldownStatus, confirmRiderPresence } from "@/lib/services/safetyService";
+import { recordConsent } from "@/lib/services/consentService";
+import { confirmRiderPresence } from "@/lib/services/safetyService";
 import { triggerEmergency } from "@/lib/services/emergencyService";
-import { getRideBatchPosition } from "@/lib/services/batchService";
 import { Event, RideRequest, Driver, CooldownStatus } from "@/types/database";
 
 function RiderContent() {
@@ -93,27 +91,30 @@ function RiderContent() {
     }
   }, []);
 
-  // Client-side rehydration: check localStorage for existing ride id
+  // Client-side rehydration: check localStorage for existing ride id.
+  // The phone is stored alongside the id so the rider can prove ownership of
+  // the ride (ride_requests has no public read policy).
   useEffect(() => {
     const tryRehydrate = async () => {
       try {
         const stored = localStorage.getItem("ralli_ride_id");
         if (!stored) return;
-        const { data, error } = await getRideRequestById(stored);
+
+        const storedPhone = localStorage.getItem("ralli_ride_phone");
+        const { data, error } = await getRideRequestById(stored, {
+          rider_phone: storedPhone,
+          client_id: clientId,
+        });
+
         if (error || !data) {
           localStorage.removeItem("ralli_ride_id");
           return;
         }
-        // If ride is still active, set and show status
-        if (["waiting", "assigned", "arrived", "in_progress"].includes(data.status)) {
-          setRideRequest(data);
-          setStep("status");
 
-          // Fetch queue position if ride is waiting
-          if (data.status === "waiting" && data.event_id) {
-            const pos = await getQueuePosition(data.id, data.event_id);
-            setQueuePosition(pos);
-          }
+        // If ride is still active, set and show status
+        if (["waiting", "assigned", "arrived", "in_progress"].includes(data.ride.status)) {
+          applyRideStatus(data);
+          setStep("status");
         } else {
           localStorage.removeItem("ralli_ride_id");
         }
@@ -123,7 +124,7 @@ function RiderContent() {
     };
 
     tryRehydrate();
-  }, []);
+  }, [clientId]);
 
   // Get user location for emergency reporting
   useEffect(() => {
@@ -160,49 +161,55 @@ function RiderContent() {
     }
   }, []);
 
-  // Subscribe to ride updates
+  // Apply a ride status payload from the API (ride + queue + batch + driver).
+  const applyRideStatus = useCallback(
+    (payload: {
+      ride: RideRequest;
+      position: number;
+      total: number;
+      batch: {
+        batch_id: string;
+        position: number;
+        total_stops: number;
+        estimated_arrival: string | null;
+      } | null;
+    }) => {
+      setRideRequest(payload.ride);
+      setQueuePosition({ position: payload.position, total: payload.total });
+      setBatchPosition(payload.batch);
+
+      const lat = payload.ride.driver?.current_lat;
+      const lng = payload.ride.driver?.current_lng;
+      if (lat != null && lng != null) {
+        setDriverLocation({ lat, lng });
+      }
+    },
+    []
+  );
+
+  // Poll for ride updates. Supabase Realtime enforces RLS, so an
+  // unauthenticated rider cannot subscribe to ride_requests now that the
+  // public SELECT policy is gone. Polling the service-role route instead.
   useEffect(() => {
     if (!rideRequest) return;
 
-    const sub = subscribeToRideRequest(rideRequest.id, async () => {
-      const { data } = await getRideRequestById(rideRequest.id);
-      if (data) {
-        setRideRequest(data);
+    let cancelled = false;
 
-        // Update queue position
-        if (data.status === "waiting" && event) {
-          const pos = await getQueuePosition(data.id, event.id);
-          setQueuePosition(pos);
-        }
+    const load = async () => {
+      const { data } = await getRideRequestById(rideRequest.id, {
+        rider_phone: rideRequest.rider_phone,
+        client_id: clientId,
+      });
+      if (!cancelled && data) applyRideStatus(data);
+    };
 
-        // Update batch position if in a batch
-        if (data.batch_id) {
-          const { data: batchPos } = await getRideBatchPosition(data.id);
-          setBatchPosition(batchPos);
-        }
-      }
-    });
+    const timer = setInterval(load, 5000);
 
     return () => {
-      sub.unsubscribe();
+      cancelled = true;
+      clearInterval(timer);
     };
-  }, [rideRequest?.id]);
-
-  // Subscribe to driver location when assigned
-  useEffect(() => {
-    if (!rideRequest?.assigned_driver_id) return;
-
-    const sub = subscribeToDriver(rideRequest.assigned_driver_id, (payload: any) => {
-      const driver = payload.new as Driver;
-      if (driver.current_lat && driver.current_lng) {
-        setDriverLocation({ lat: driver.current_lat, lng: driver.current_lng });
-      }
-    });
-
-    return () => {
-      sub.unsubscribe();
-    };
-  }, [rideRequest?.assigned_driver_id]);
+  }, [rideRequest?.id, rideRequest?.rider_phone, clientId, applyRideStatus]);
 
   const handleCodeSubmit = async () => {
     if (!accessCode.trim()) {
@@ -253,15 +260,11 @@ function RiderContent() {
         const identifier = json.identifier || (json.data && json.data.rider_identifier_hash) || null;
         if (identifier) {
           setRiderHash(identifier);
-
-          // Check consent
-          const { hasConsent: consent } = await checkConsent(event.id, identifier);
-          setHasConsent(consent);
-
-          // Check cooldown
-          const { data: cooldown } = await getCooldownStatus(event.id, identifier);
-          setCooldownStatus(cooldown);
         }
+        // Consent and cooldown are read from the service-role response;
+        // rider_consents and rider_penalties are no longer publicly readable.
+        setHasConsent(!!json.has_consent);
+        setCooldownStatus(json.cooldown ?? null);
       }
     } catch (err) {
       console.error("Failed to identify rider:", err);
@@ -275,13 +278,23 @@ function RiderContent() {
 
   // Handle TOS acceptance
   const handleTOSAccept = async () => {
-    if (!event || !riderHash) return;
+    if (!event) return;
 
     setIsLoading(true);
-    await recordConsent(event.id, riderHash);
+    await recordConsent(event.id, { rider_phone: riderPhone, client_id: clientId });
     setHasConsent(true);
     setShowTOSModal(false);
     setIsLoading(false);
+  };
+
+  // Persist the ride id plus the phone. The phone is required because
+  // GET /api/rides/[id] only returns a ride to a caller who can prove they
+  // own it, and the identifier is derived from the phone.
+  const persistRide = ({ id, phone }: { id: string; phone?: string | null }) => {
+    try {
+      localStorage.setItem("ralli_ride_id", id);
+      if (phone) localStorage.setItem("ralli_ride_phone", phone);
+    } catch {}
   };
 
   // Handle "I'm Here" confirmation
@@ -337,8 +350,11 @@ function RiderContent() {
       // Clear the ride from state and localStorage
       setRideRequest(null);
       setQueuePosition({ position: 0, total: 0 });
+      setBatchPosition(null);
+      setDriverLocation(null);
       try {
         localStorage.removeItem("ralli_ride_id");
+        localStorage.removeItem("ralli_ride_phone");
       } catch {}
       setStep("form");
     }
@@ -374,16 +390,18 @@ function RiderContent() {
     setShowExistingRideModal(false);
     setError("");
 
-    // Store ride id for client-side rehydration
-    try {
-      localStorage.setItem("ralli_ride_id", existingRideData.id);
-    } catch {}
+    // Store ride id (and phone, to prove ownership on reload)
+    persistRide({
+      id: existingRideData.id,
+      phone: existingRideData.rider_phone ?? riderPhone,
+    });
 
-    // Get initial queue position
-    if (event) {
-      const pos = await getQueuePosition(existingRideData.id, event.id);
-      setQueuePosition(pos);
-    }
+    // Queue position comes from the status payload
+    const status = await getRideRequestById(existingRideData.id, {
+      rider_phone: existingRideData.rider_phone ?? riderPhone,
+      client_id: clientId,
+    });
+    if (status.data) applyRideStatus(status.data);
 
     setStep("status");
   };
@@ -544,19 +562,17 @@ function RiderContent() {
       setRideRequest(existingRide);
       setError(""); // Clear any prior error
 
-      // Get queue position if ride is waiting
-      if (existingRide.status === "waiting" && event) {
-        const pos = await getQueuePosition(existingRide.id, event.id);
-        setQueuePosition(pos);
-      }
+      persistRide({ id: existingRide.id, phone: existingRide.rider_phone ?? riderPhone });
+
+      // Queue position comes from the status payload
+      const status = await getRideRequestById(existingRide.id, {
+        rider_phone: existingRide.rider_phone ?? riderPhone,
+        client_id: clientId,
+      });
+      if (status.data) applyRideStatus(status.data);
 
       setStep("status");
       setIsLoading(false);
-
-      // Store ride id for client-side rehydration
-      try {
-        localStorage.setItem("ralli_ride_id", existingRide.id);
-      } catch {}
       return;
     }
 
@@ -611,14 +627,14 @@ function RiderContent() {
     setRideRequest(data as RideRequest);
     setError(""); // Clear any prior error
 
-    // Store ride id for client-side rehydration
-    try {
-      localStorage.setItem("ralli_ride_id", data.id);
-    } catch {}
+    persistRide({ id: data.id, phone: data.rider_phone ?? riderPhone });
 
-    // Get initial queue position
-    const pos = await getQueuePosition(data.id, event!.id);
-    setQueuePosition(pos);
+    // Queue position comes from the status payload
+    const status = await getRideRequestById(data.id, {
+      rider_phone: data.rider_phone ?? riderPhone,
+      client_id: clientId,
+    });
+    if (status.data) applyRideStatus(status.data);
 
     setStep("status");
     setIsLoading(false);
@@ -976,8 +992,11 @@ function RiderContent() {
                       arrivalDeadlineTimestamp={rideRequest.arrival_deadline_timestamp}
                       onExpired={() => {
                         // Refresh ride status when expired
-                        getRideRequestById(rideRequest.id).then(({ data }) => {
-                          if (data) setRideRequest(data);
+                        getRideRequestById(rideRequest.id, {
+                          rider_phone: rideRequest.rider_phone,
+                          client_id: clientId,
+                        }).then(({ data }) => {
+                          if (data) applyRideStatus(data);
                         });
                       }}
                     />

@@ -48,22 +48,26 @@ export async function createEvent(
   return { data, error: null };
 }
 
-// Get event by access code
+// Get event by access code.
+// Goes through a service-role route: `events` no longer has a public SELECT
+// policy, and riders are unauthenticated.
 export async function getEventByAccessCode(
   accessCode: string
 ): Promise<{ data: Event | null; error: Error | null }> {
-  const { data, error } = await supabase
-    .from("events")
-    .select("*")
-    .eq("access_code", accessCode.toUpperCase())
-    .eq("is_active", true)
-    .single();
+  try {
+    const res = await fetch(
+      `/api/events/lookup?code=${encodeURIComponent(accessCode.trim().toUpperCase())}`
+    );
 
-  if (error) {
-    return { data: null, error: new Error(error.message) };
+    if (!res.ok) {
+      return { data: null, error: new Error("Invalid or inactive access code") };
+    }
+
+    const json = await res.json();
+    return { data: (json.data as Event) ?? null, error: null };
+  } catch (err) {
+    return { data: null, error: err as Error };
   }
-
-  return { data, error: null };
 }
 
 // Get event by ID

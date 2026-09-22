@@ -40,33 +40,31 @@ export async function checkConsent(
   }
 }
 
-// Record rider consent to TOS
+// Record rider consent to TOS.
+// `rider_consents` is service-role only, and the identifier is derived
+// server-side from the phone / client_id rather than trusted from the client.
 export async function recordConsent(
   eventId: string,
-  riderIdentifierHash: string,
-  ipAddress?: string
-): Promise<{ data: RiderConsent | null; error: Error | null }> {
+  identity: { rider_phone?: string | null; client_id?: string | null }
+): Promise<{ data: { identifier: string } | null; error: Error | null }> {
   try {
-    const { data, error } = await supabase
-      .from("rider_consents")
-      .insert({
+    const res = await fetch("/api/rider/consent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         event_id: eventId,
-        rider_identifier_hash: riderIdentifierHash,
-        ip_address: ipAddress,
-      })
-      .select()
-      .single();
+        rider_phone: identity.rider_phone ?? null,
+        client_id: identity.client_id ?? null,
+      }),
+    });
 
-    if (error) {
-      // If already exists, that's fine - treat as success
-      if (error.code === "23505") {
-        // unique violation
-        return { data: null, error: null };
-      }
-      return { data: null, error: new Error(error.message) };
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return { data: null, error: new Error(json.error ?? "Failed to record consent") };
     }
 
-    return { data: data as RiderConsent, error: null };
+    return { data: { identifier: json.identifier }, error: null };
   } catch (err) {
     return { data: null, error: err as Error };
   }

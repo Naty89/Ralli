@@ -45,9 +45,46 @@ export async function GET(request: Request) {
   }
 
   try {
+    const admin = createAdminClient();
     const existing = await getExistingActiveRide(eventId, identifier, phoneForId);
-    // Return both identifier (always) and any existing active ride
-    return NextResponse.json({ data: existing || null, identifier });
+
+    // rider_consents and rider_penalties are service-role only, so the rider
+    // screen reads both through this endpoint rather than querying them.
+    const { data: consentRow } = await admin
+      .from("rider_consents")
+      .select("id")
+      .eq("event_id", eventId)
+      .eq("rider_identifier_hash", identifier)
+      .maybeSingle();
+
+    const { data: penaltyRow } = await admin
+      .from("rider_penalties")
+      .select("cooldown_until, no_show_count")
+      .eq("event_id", eventId)
+      .eq("rider_identifier_hash", identifier)
+      .maybeSingle();
+
+    let cooldown: { is_in_cooldown: boolean; cooldown_until?: string; remaining_minutes?: number } = {
+      is_in_cooldown: false,
+    };
+
+    if (penaltyRow?.cooldown_until) {
+      const remainingMs = new Date(penaltyRow.cooldown_until).getTime() - Date.now();
+      if (remainingMs > 0) {
+        cooldown = {
+          is_in_cooldown: true,
+          cooldown_until: penaltyRow.cooldown_until,
+          remaining_minutes: Math.ceil(remainingMs / 60000),
+        };
+      }
+    }
+
+    return NextResponse.json({
+      data: existing || null,
+      identifier,
+      has_consent: !!consentRow,
+      cooldown,
+    });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

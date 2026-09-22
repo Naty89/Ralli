@@ -76,27 +76,47 @@ export async function createRideRequest(
   return { data, error: null };
 }
 
-// Get ride request by ID
+export interface RideStatusPayload {
+  ride: RideRequest;
+  position: number;
+  total: number;
+  batch: {
+    batch_id: string;
+    position: number;
+    total_stops: number;
+    estimated_arrival: string | null;
+  } | null;
+}
+
+// Get a ride plus everything the rider screen needs (queue position, batch
+// stop, driver location). Runs through a service-role route because
+// ride_requests has no public SELECT policy and riders are unauthenticated.
+//
+// `identity` proves ownership; omit it only when the caller is an
+// authenticated admin or the assigned driver (session-checked server-side).
 export async function getRideRequestById(
-  requestId: string
-): Promise<{ data: RideRequest | null; error: Error | null }> {
-  const { data, error } = await supabase
-    .from("ride_requests")
-    .select(`
-      *,
-      driver:drivers(
-        *,
-        profile:profiles(*)
-      )
-    `)
-    .eq("id", requestId)
-    .single();
+  requestId: string,
+  identity?: RideIdentity
+): Promise<{ data: RideStatusPayload | null; error: Error | null }> {
+  try {
+    const params = new URLSearchParams();
+    if (identity?.rider_phone) params.set("rider_phone", identity.rider_phone);
+    if (identity?.client_id) params.set("client_id", identity.client_id);
 
-  if (error) {
-    return { data: null, error: new Error(error.message) };
+    const query = params.toString();
+    const res = await fetch(
+      `/api/rides/${requestId}${query ? `?${query}` : ""}`
+    );
+
+    if (!res.ok) {
+      return { data: null, error: new Error("Ride not found") };
+    }
+
+    const json = await res.json();
+    return { data: (json as RideStatusPayload) ?? null, error: null };
+  } catch (err) {
+    return { data: null, error: err as Error };
   }
-
-  return { data, error: null };
 }
 
 // Get all ride requests for an event
@@ -122,24 +142,12 @@ export async function getEventRideRequests(
   return { data: data || [], error: null };
 }
 
-// Get queue position for a ride request
-export async function getQueuePosition(
-  requestId: string,
-  eventId: string
-): Promise<{ position: number; total: number }> {
-  const { data, error } = await supabase
-    .from("ride_requests")
-    .select("id, created_at")
-    .eq("event_id", eventId)
-    .eq("status", "waiting")
-    .order("created_at", { ascending: true });
+// Queue position is now computed server-side and returned by
+// GET /api/rides/[id]; ride_requests has no public SELECT policy, so the
+// browser can no longer calculate it itself.
 
-  if (error || !data) {
-    return { position: 0, total: 0 };
-  }
-
-  const position = data.findIndex((r) => r.id === requestId) + 1;
-  return { position, total: data.length };
+export async function getQueuePosition(): Promise<{ position: number; total: number }> {
+  return { position: 0, total: 0 };
 }
 
 // Assign driver to ride request
