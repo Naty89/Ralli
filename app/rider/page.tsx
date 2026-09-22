@@ -35,6 +35,11 @@ import { confirmRiderPresence } from "@/lib/services/safetyService";
 import { triggerEmergency } from "@/lib/services/emergencyService";
 import { Event, RideRequest, Driver, CooldownStatus } from "@/types/database";
 
+// How often the rider screen refreshes. Riders watch a multi-minute ETA
+// countdown, not a live map, so 10s is plenty and keeps load down when
+// hundreds of riders are waiting at once.
+const RIDE_POLL_MS = 10000;
+
 function RiderContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -193,9 +198,16 @@ function RiderContent() {
   useEffect(() => {
     if (!rideRequest) return;
 
+    // Nothing left to wait for - stop polling entirely.
+    if (["completed", "cancelled", "no_show"].includes(rideRequest.status)) return;
+
     let cancelled = false;
 
     const load = async () => {
+      // Don't poll tabs the rider isn't looking at.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
       const { data } = await getRideRequestById(rideRequest.id, {
         rider_phone: rideRequest.rider_phone,
         client_id: clientId,
@@ -203,13 +215,20 @@ function RiderContent() {
       if (!cancelled && data) applyRideStatus(data);
     };
 
-    const timer = setInterval(load, 5000);
+    const timer = setInterval(load, RIDE_POLL_MS);
+
+    // Refresh immediately when the rider comes back to the tab.
+    const onVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       cancelled = true;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [rideRequest?.id, rideRequest?.rider_phone, clientId, applyRideStatus]);
+  }, [rideRequest?.id, rideRequest?.rider_phone, rideRequest?.status, clientId, applyRideStatus]);
 
   const handleCodeSubmit = async () => {
     if (!accessCode.trim()) {
