@@ -164,9 +164,17 @@ deliberately omitted. This requires changing every rider-facing query from
 
 ## 3. Cron schedule
 
-`vercel.json` requests a once-per-minute cron, which the Hobby plan will
-reject. Either upgrade to Pro, or delete `vercel.json` and point an external
-scheduler (e.g. cron-job.org) at:
+Vercel Cron on the Hobby plan is limited to **once per day**, and a once-a-day
+sweep is useless for a 3-minute no-show deadline. It also hard-fails the
+build:
+
+```
+Error: Hobby accounts are limited to daily cron jobs.
+This cron expression (* * * * *) would run more than once per day.
+```
+
+`vercel.json` has therefore been **removed**. Use an external scheduler
+(e.g. cron-job.org, free tier is fine) pointed at:
 
 ```
 GET https://<app>.vercel.app/api/cron/process-noshow
