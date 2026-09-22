@@ -91,7 +91,7 @@ const anon = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE
 for (const t of ["profiles", "events", "drivers", "ride_requests", "rider_penalties", "rider_rate_limits"]) {
   const { data, error } = await anon.from(t).select("*").limit(1);
   if (error) {
-    console.log(`  ${t.padEnd(20)} BLOCKED (${error.code})`);
+    console.log(`  ${t.padEnd(20)} BLOCKED (${error.code}) :: ${error.message}`);
   } else if (data && data.length > 0) {
     console.log(`  ${t.padEnd(20)} *** READABLE BY ANYONE *** sample keys: ${Object.keys(data[0]).slice(0, 8).join(",")}`);
   } else {
