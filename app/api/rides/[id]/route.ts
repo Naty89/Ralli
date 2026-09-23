@@ -35,16 +35,23 @@ export async function GET(
   const ride = auth.ride;
   const admin = createAdminClient();
 
-  // Queue position among waiting rides in this event.
-  const { data: waiting } = await admin
-    .from("ride_requests")
-    .select("id")
-    .eq("event_id", ride.event_id)
-    .eq("status", "waiting")
-    .order("created_at", { ascending: true });
+  // Queue position among waiting rides in this event. Only meaningful while
+  // the ride is still waiting, so skip the query otherwise - this is the
+  // hottest endpoint in the app.
+  let waitingList: Array<{ id: string }> = [];
+  let index = -1;
 
-  const waitingList = (waiting ?? []) as Array<{ id: string }>;
-  const index = waitingList.findIndex((r) => r.id === rideId);
+  if (ride.status === "waiting") {
+    const { data: waiting } = await admin
+      .from("ride_requests")
+      .select("id")
+      .eq("event_id", ride.event_id)
+      .eq("status", "waiting")
+      .order("created_at", { ascending: true });
+
+    waitingList = (waiting ?? []) as Array<{ id: string }>;
+    index = waitingList.findIndex((r) => r.id === rideId);
+  }
 
   // Driver, including live location for the map.
   let driver: any = null;

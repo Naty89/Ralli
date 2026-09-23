@@ -32,6 +32,9 @@ const N_RIDES = parseInt(arg("rides", "100"), 10);
 const N_POLLERS = parseInt(arg("pollers", "50"), 10);
 const DURATION_S = parseInt(arg("duration", "30"), 10);
 const POLL_MS = parseInt(arg("interval", "10000"), 10);
+// Spread submissions over this many seconds instead of firing all at once.
+// Real arrival is a ramp, not a wall.
+const RAMP_S = parseInt(arg("ramp", "0"), 10);
 
 const env = loadEnv();
 const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
@@ -86,8 +89,12 @@ console.log(`\nTest event ${eventId} on ${BASE}\n`);
 
 try {
   // --- phase 1: concurrent ride submissions ---------------------------------
-  // 10 digits, unique per simulated rider
-  const phone = (i) => "555" + String(1000000 + i).slice(-7);
+  // 10 digits, unique per simulated rider.
+  // --same-phone simulates one rider double-tapping submit (worst case for
+  // the rate limiter, which used to 500 on every later request).
+  const samePhone = argv.includes("--same-phone");
+  const phone = (i) =>
+    samePhone ? "555" + String(1000000).slice(-7) : "555" + String(1000000 + i).slice(-7);
 
   const createTimes = [];
   const createOk = { count: 0 };
@@ -127,9 +134,11 @@ try {
 
   console.log(`Phase 1: ${N_RIDES} concurrent ride submissions...`);
   const t1 = Date.now();
+  const delay = RAMP_S > 0 ? (RAMP_S * 1000) / N_RIDES : 0;
   const created = (
     await Promise.all(
       Array.from({ length: N_RIDES }, async (_, i) => {
+        if (delay) await new Promise((r) => setTimeout(r, delay * i));
         const id = await createOne(i);
         return id ? { id, phone: phone(i) } : null;
       })
