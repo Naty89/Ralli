@@ -54,59 +54,87 @@ export async function getExistingActiveRide(
   return data;
 }
 
-// Simple rate limiter: allow up to 3 requests within 10 minutes
-// Note: Idempotency check (existing ride detection) must be done BEFORE calling this
-export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: string) {
-  const admin = createAdminClient();
-  const TEN_MINUTES = 10 * 60; // seconds
-
-  // Fetch existing rate limit record
-  const { data: existing, error: selErr } = await admin
+// Read the rate-limit row for a rider.
+// limit(1) matters: without it, a duplicate row makes maybeSingle() throw
+// "JSON object requested, multiple (or no) rows returned", which surfaced as
+// a 500 on every subsequent request from that rider.
+async function fetchRateLimitRow(admin: any, eventId: string, riderIdentifier: string) {
+  const { data, error } = await admin
     .from("rider_rate_limits")
     .select("*")
     .eq("event_id", eventId)
     .eq("rider_identifier_hash", riderIdentifier)
+    .limit(1)
     .maybeSingle();
 
-  if (selErr) throw new Error(selErr.message);
+  if (error) throw new Error(error.message);
+  return data;
+}
 
-  const now = new Date();
+// Simple rate limiter: allow up to 3 requests within 10 minutes.
+// Note: Idempotency check (existing ride detection) must be done BEFORE calling this.
+//
+// Safe under concurrency: a rider double-tapping submit fires two requests at
+// once, and the naive read-then-insert created two rows, which then broke every
+// later request from that rider. Inserts tolerate the collision, and increments
+// use an optimistic guard on request_count so two writers cannot both win.
+export async function checkAndUpdateRateLimit(eventId: string, riderIdentifier: string) {
+  const admin = createAdminClient();
+  const TEN_MINUTES = 10 * 60; // seconds
 
-  if (!existing) {
-    // Insert new record with first request
-    const { error: insErr } = await admin.from("rider_rate_limits").insert({
-      event_id: eventId,
-      rider_identifier_hash: riderIdentifier,
-      request_count: 1,
-      last_request_timestamp: now,
-    });
-    if (insErr) throw new Error(insErr.message);
-    return { allowed: true };
-  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const now = new Date();
+    let existing = await fetchRateLimitRow(admin, eventId, riderIdentifier);
 
-  const lastTs = new Date(existing.last_request_timestamp || existing.created_at || now);
-  const delta = Math.floor((now.getTime() - lastTs.getTime()) / 1000);
+    if (!existing) {
+      const { error: insErr } = await admin.from("rider_rate_limits").insert({
+        event_id: eventId,
+        rider_identifier_hash: riderIdentifier,
+        request_count: 1,
+        last_request_timestamp: now,
+      });
 
-  if (delta > TEN_MINUTES) {
-    // Reset counter
-    const { error: updErr } = await admin
+      // 23505 = someone else inserted concurrently. Re-read and fall through
+      // to the normal path instead of failing.
+      if (!insErr) return { allowed: true };
+      if (insErr.code !== "23505") throw new Error(insErr.message);
+
+      existing = await fetchRateLimitRow(admin, eventId, riderIdentifier);
+      if (!existing) continue;
+    }
+
+    const lastTs = new Date(existing.last_request_timestamp || existing.created_at || now);
+    const delta = Math.floor((now.getTime() - lastTs.getTime()) / 1000);
+
+    if (delta > TEN_MINUTES) {
+      const { data: updated } = await admin
+        .from("rider_rate_limits")
+        .update({ request_count: 1, last_request_timestamp: now })
+        .eq("id", existing.id)
+        .select("id")
+        .maybeSingle();
+      if (updated) return { allowed: true };
+      continue;
+    }
+
+    if ((existing.request_count || 0) >= 3) {
+      return { allowed: false };
+    }
+
+    const expected = existing.request_count || 0;
+    const { data: updated } = await admin
       .from("rider_rate_limits")
-      .update({ request_count: 1, last_request_timestamp: now })
-      .eq("id", existing.id);
-    if (updErr) throw new Error(updErr.message);
-    return { allowed: true };
+      .update({ request_count: expected + 1, last_request_timestamp: now })
+      .eq("id", existing.id)
+      .eq("request_count", expected)
+      .select("id")
+      .maybeSingle();
+
+    if (updated) return { allowed: true };
+    // Lost the race - re-read and try again.
   }
 
-  if ((existing.request_count || 0) >= 3) {
-    return { allowed: false };
-  }
-
-  // Increment request count
-  const { error: incErr } = await admin
-    .from("rider_rate_limits")
-    .update({ request_count: (existing.request_count || 0) + 1, last_request_timestamp: now })
-    .eq("id", existing.id);
-
-  if (incErr) throw new Error(incErr.message);
+  // Could not settle the counter. Fail open: a bookkeeping race should never
+  // stop someone requesting a safe ride home.
   return { allowed: true };
 }
