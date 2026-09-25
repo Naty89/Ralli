@@ -1,43 +1,17 @@
 import { supabase } from "@/lib/supabaseClient";
-import { RiderPenalty, CooldownStatus, RideRequest } from "@/types/database";
+import { RiderPenalty, RideRequest } from "@/types/database";
 
 // Constants
 export const NO_SHOW_TIMER_MINUTES = 3;
 export const NO_SHOW_THRESHOLD = 2;
 export const COOLDOWN_MINUTES = 15;
 
-// Set arrival deadline when driver arrives (3 minutes from now)
-export async function setArrivalDeadline(
-  rideId: string
-): Promise<{ success: boolean; error: Error | null }> {
-  try {
-    const deadline = new Date();
-    deadline.setMinutes(deadline.getMinutes() + NO_SHOW_TIMER_MINUTES);
-
-    const { error } = await supabase
-      .from("ride_requests")
-      .update({
-        arrival_deadline_timestamp: deadline.toISOString(),
-        rider_confirmed: false,
-      })
-      .eq("id", rideId);
-
-    if (error) {
-      return { success: false, error: new Error(error.message) };
-    }
-
-    return { success: true, error: null };
-  } catch (err) {
-    return { success: false, error: err as Error };
-  }
-}
-
 // Rider confirms presence - "I'm here" button clicked.
 // Riders are unauthenticated, so RLS blocks direct updates. Use the API route
 // (service role) when in the browser so the update succeeds.
 export async function confirmRiderPresence(
   rideId: string,
-  identity?: { rider_phone?: string | null; client_id?: string | null }
+  identity?: { access_token?: string | null }
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
     if (typeof window !== "undefined") {
@@ -125,36 +99,76 @@ export async function processNoShow(
   eventId: string,
   riderIdentifierHash: string | null,
   driverId: string | null,
-  client: any = supabase,
-  passengerCount: number = 0
+  client: any = supabase
 ): Promise<{ success: boolean; error: Error | null }> {
   try {
+    const { data: rideBefore } = await client
+      .from("ride_requests")
+      .select("batch_id")
+      .eq("id", rideId)
+      .maybeSingle();
+
     // Update ride status to no_show
-    const { error: rideError } = await client
+    const { data: markedNoShow, error: rideError } = await client
       .from("ride_requests")
       .update({ status: "no_show" })
-      .eq("id", rideId);
+      .eq("id", rideId)
+      .eq("status", "arrived")
+      .eq("rider_confirmed", false)
+      .lt("arrival_deadline_timestamp", new Date().toISOString())
+      .select("id")
+      .maybeSingle();
 
     if (rideError) {
       return { success: false, error: new Error(rideError.message) };
     }
+    if (!markedNoShow) return { success: true, error: null };
 
-    // Free the driver and release the seats they were holding
+    if (rideBefore?.batch_id) {
+      await client
+        .from("ride_batch_items")
+        .delete()
+        .eq("batch_id", rideBefore.batch_id)
+        .eq("ride_request_id", rideId);
+
+      const { data: activeBatchRides } = await client
+        .from("ride_requests")
+        .select("passenger_count")
+        .eq("batch_id", rideBefore.batch_id)
+        .in("status", ["assigned", "arrived", "in_progress"]);
+
+      const batchPassengers = (activeBatchRides || []).reduce(
+        (sum: number, ride: { passenger_count: number }) => sum + (ride.passenger_count || 0),
+        0
+      );
+      await client
+        .from("ride_batches")
+        .update({
+          total_passengers: batchPassengers,
+          ...(batchPassengers === 0 ? { status: "cancelled" } : {}),
+        })
+        .eq("id", rideBefore.batch_id);
+    }
+
+    // Keep the driver assigned if other rides in the same batch (or another
+    // active assignment) remain. Recompute instead of blindly freeing them.
     if (driverId) {
-      const { data: driver } = await client
-        .from("drivers")
-        .select("id, current_passenger_load")
-        .eq("id", driverId)
-        .maybeSingle();
+      const { data: activeRides } = await client
+        .from("ride_requests")
+        .select("passenger_count")
+        .eq("assigned_driver_id", driverId)
+        .in("status", ["assigned", "arrived", "in_progress"]);
+
+      const remainingPassengers = (activeRides || []).reduce(
+        (sum: number, ride: { passenger_count: number }) => sum + (ride.passenger_count || 0),
+        0
+      );
 
       const { error: driverError } = await client
         .from("drivers")
         .update({
-          current_status: "available",
-          current_passenger_load: Math.max(
-            0,
-            (driver?.current_passenger_load || 0) - passengerCount
-          ),
+          current_status: activeRides?.length ? "assigned" : "available",
+          current_passenger_load: remainingPassengers,
         })
         .eq("id", driverId);
 
@@ -171,56 +185,6 @@ export async function processNoShow(
     return { success: true, error: null };
   } catch (err) {
     return { success: false, error: err as Error };
-  }
-}
-
-// Get cooldown status for a rider
-export async function getCooldownStatus(
-  eventId: string,
-  riderIdentifierHash: string
-): Promise<{ data: CooldownStatus | null; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from("rider_penalties")
-      .select("cooldown_until, no_show_count")
-      .eq("event_id", eventId)
-      .eq("rider_identifier_hash", riderIdentifierHash)
-      .maybeSingle();
-
-    if (error) {
-      return { data: null, error: new Error(error.message) };
-    }
-
-    if (!data || !data.cooldown_until) {
-      return {
-        data: { is_in_cooldown: false },
-        error: null,
-      };
-    }
-
-    const cooldownEnd = new Date(data.cooldown_until);
-    const now = new Date();
-
-    if (cooldownEnd <= now) {
-      return {
-        data: { is_in_cooldown: false },
-        error: null,
-      };
-    }
-
-    const remainingMs = cooldownEnd.getTime() - now.getTime();
-    const remainingMinutes = Math.ceil(remainingMs / 60000);
-
-    return {
-      data: {
-        is_in_cooldown: true,
-        cooldown_until: data.cooldown_until,
-        remaining_minutes: remainingMinutes,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { data: null, error: err as Error };
   }
 }
 
@@ -278,29 +242,6 @@ export async function incrementNoShowCount(
     return { success: true, error: null };
   } catch (err) {
     return { success: false, error: err as Error };
-  }
-}
-
-// Get penalty record for a rider
-export async function getRiderPenalty(
-  eventId: string,
-  riderIdentifierHash: string
-): Promise<{ data: RiderPenalty | null; error: Error | null }> {
-  try {
-    const { data, error } = await supabase
-      .from("rider_penalties")
-      .select("*")
-      .eq("event_id", eventId)
-      .eq("rider_identifier_hash", riderIdentifierHash)
-      .maybeSingle();
-
-    if (error) {
-      return { data: null, error: new Error(error.message) };
-    }
-
-    return { data: data as RiderPenalty | null, error: null };
-  } catch (err) {
-    return { data: null, error: err as Error };
   }
 }
 

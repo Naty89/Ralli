@@ -88,58 +88,6 @@ export function isValidTransition(
   return VALID_RIDE_TRANSITIONS[currentStatus]?.includes(newStatus) ?? false;
 }
 
-// Assign a driver to a ride with validation
-export async function assignDriverToRide(
-  rideId: string,
-  driverId: string,
-  etaMinutes?: number
-): Promise<{ success: boolean; error: Error | null }> {
-  // Get current ride status
-  const { data: ride, error: rideError } = await supabase
-    .from("ride_requests")
-    .select("status")
-    .eq("id", rideId)
-    .single();
-
-  if (rideError || !ride) {
-    return { success: false, error: new Error("Ride not found") };
-  }
-
-  // Validate transition
-  if (!isValidTransition(ride.status as RideStatus, "assigned")) {
-    return {
-      success: false,
-      error: new Error(`Cannot assign ride with status: ${ride.status}`),
-    };
-  }
-
-  // Update ride request
-  const { error: updateRideError } = await supabase
-    .from("ride_requests")
-    .update({
-      assigned_driver_id: driverId,
-      status: "assigned" as RideStatus,
-      driver_eta_minutes: etaMinutes,
-    })
-    .eq("id", rideId);
-
-  if (updateRideError) {
-    return { success: false, error: new Error(updateRideError.message) };
-  }
-
-  // Update driver status
-  const { error: updateDriverError } = await supabase
-    .from("drivers")
-    .update({ current_status: "assigned" })
-    .eq("id", driverId);
-
-  if (updateDriverError) {
-    return { success: false, error: new Error(updateDriverError.message) };
-  }
-
-  return { success: true, error: null };
-}
-
 // NOTE: Auto/batch dispatching lives in `rides-dispatch.ts` and runs
 // server-side (admin client) so it bypasses RLS. Do not re-introduce a
 // client-side dispatch loop here - it would silently diverge from the
@@ -154,7 +102,7 @@ export async function transitionRideStatus(
   // Get current ride
   const { data: ride, error: rideError } = await supabase
     .from("ride_requests")
-    .select("status, assigned_driver_id")
+    .select("status, assigned_driver_id, passenger_count")
     .eq("id", rideId)
     .single();
 
@@ -191,25 +139,57 @@ export async function transitionRideStatus(
   }
 
   // Update ride
-  const { error: updateError } = await supabase
+  const { data: updatedRide, error: updateError } = await supabase
     .from("ride_requests")
     .update(updates)
-    .eq("id", rideId);
+    .eq("id", rideId)
+    .eq("status", ride.status)
+    .select("id")
+    .maybeSingle();
 
   if (updateError) {
     return { success: false, error: new Error(updateError.message) };
   }
+  if (!updatedRide) {
+    return { success: false, error: new Error("Ride status changed; refresh and try again") };
+  }
 
-  // If completing or cancelling, set driver back to available
+  // Recompute the driver's load from all remaining active rides. A driver in
+  // a batch stays assigned while other pickups/rides remain; finishing one
+  // ride must not make that driver available to the dispatch queue.
   if (
     (newStatus === "completed" || newStatus === "cancelled" || newStatus === "no_show") &&
     (driverId || ride.assigned_driver_id)
   ) {
     const targetDriverId = driverId || ride.assigned_driver_id;
-    await supabase
+    const { data: remainingRides } = await supabase
+      .from("ride_requests")
+      .select("passenger_count")
+      .eq("assigned_driver_id", targetDriverId)
+      .in("status", ["assigned", "arrived", "in_progress"]);
+
+    const remainingPassengers = (remainingRides || []).reduce(
+      (sum, activeRide) => sum + (activeRide.passenger_count || 0),
+      0
+    );
+
+    // The ride transition already committed, so a failure here must not fail
+    // the caller - but it must not be silent either: stale seat accounting
+    // makes a driver look busier than they are to the dispatch queue.
+    const { error: driverError } = await supabase
       .from("drivers")
-      .update({ current_status: "available" })
+      .update({
+        current_status: remainingRides?.length ? "assigned" : "available",
+        current_passenger_load: remainingPassengers,
+      })
       .eq("id", targetDriverId);
+
+    if (driverError) {
+      console.error(
+        `[transitionRideStatus] ride ${rideId} moved to ${newStatus} but driver ${targetDriverId} accounting failed:`,
+        driverError.message
+      );
+    }
   }
 
   return { success: true, error: null };

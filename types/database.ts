@@ -2,6 +2,8 @@
 
 export type UserRole = "admin" | "driver";
 
+export type DriverApprovalStatus = "pending" | "approved" | "rejected";
+
 export type DriverStatus = "offline" | "available" | "assigned";
 
 export type RideDirection = "to_event" | "from_event";
@@ -34,6 +36,9 @@ export const VALID_RIDE_TRANSITIONS: Record<RideStatus, RideStatus[]> = {
 export interface Profile {
   id: string;
   role: UserRole;
+  approval_status: DriverApprovalStatus;
+  approval_decided_at?: string | null;
+  approval_decided_by?: string | null;
   full_name: string;
   fraternity_name: string;
   organization_code: string; // Unique code for linking admins and drivers
@@ -98,6 +103,7 @@ export interface RideRequest {
   arrival_deadline_timestamp?: string;
   rider_confirmed: boolean;
   rider_identifier_hash?: string;
+  rider_access_token_hash?: string | null;
   batch_id?: string;
   pickup_sequence_index?: number;
   ride_direction?: RideDirection;

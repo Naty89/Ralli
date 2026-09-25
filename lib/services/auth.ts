@@ -1,34 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import { Profile, UserRole } from "@/types/database";
-
-// Generate a random 6-character organization code
-function generateOrganizationCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let result = "";
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
-// Validate that an organization code exists (for driver signup)
-export async function validateOrganizationCode(
-  code: string
-): Promise<{ valid: boolean; fraternityName: string | null }> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("fraternity_name")
-    .eq("organization_code", code.toUpperCase())
-    .eq("role", "admin")
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) {
-    return { valid: false, fraternityName: null };
-  }
-
-  return { valid: true, fraternityName: data.fraternity_name };
-}
+import { Profile } from "@/types/database";
 
 // Sign up for admins (generates organization code).
 // Runs through a server route so the signup code check cannot be bypassed
@@ -63,6 +34,21 @@ export async function signUpAdmin(
       };
     }
 
+    // The service-role route creates the user but does not establish a browser
+    // session. Sign in here before the UI navigates to the admin dashboard.
+    const { data: sessionData, error: sessionError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (sessionError || !sessionData.session) {
+      return {
+        data: json,
+        organizationCode: json.organizationCode ?? null,
+        error: new Error("Admin account created. Please sign in with your new credentials."),
+      };
+    }
+
     return { data: json, organizationCode: json.organizationCode ?? null, error: null };
   } catch (err) {
     return { data: null, organizationCode: null, error: err as Error };
@@ -76,72 +62,29 @@ export async function signUpDriver(
   fullName: string,
   organizationCode: string
 ): Promise<{ data: any; error: Error | null }> {
-  // First validate the organization code
-  const { valid, fraternityName } = await validateOrganizationCode(organizationCode);
+  try {
+    const response = await fetch("/api/driver/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, fullName, organizationCode }),
+    });
+    const json = await response.json().catch(() => ({}));
 
-  if (!valid || !fraternityName) {
-    return { data: null, error: new Error("Invalid organization code. Please check with your admin.") };
-  }
+    if (!response.ok) {
+      return { data: null, error: new Error(json.error ?? "Failed to create driver account") };
+    }
 
-  // Create auth user
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        full_name: fullName,
-        fraternity_name: fraternityName,
-        role: "driver",
-      },
-    },
-  });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data.session) {
+      return {
+        data: json,
+        error: new Error("Driver application submitted. Please sign in to check its approval status."),
+      };
+    }
 
-  if (authError) {
-    return { data: null, error: new Error(authError.message) };
-  }
-
-  if (!authData.user) {
-    return { data: null, error: new Error("Failed to create user") };
-  }
-
-  // Check if email confirmation is required
-  if (!authData.session) {
-    return {
-      data: authData,
-      error: new Error("Please check your email to confirm your account before signing in.")
-    };
-  }
-
-  // Create profile with same organization code
-  const { error: profileError } = await supabase.from("profiles").insert({
-    id: authData.user.id,
-    full_name: fullName,
-    fraternity_name: fraternityName,
-    role: "driver",
-    organization_code: organizationCode.toUpperCase(),
-  } as any);
-
-  if (profileError) {
-    return { data: null, error: new Error(profileError.message) };
-  }
-
-  return { data: authData, error: null };
-}
-
-// Legacy signUp function (kept for compatibility)
-export async function signUp(
-  email: string,
-  password: string,
-  fullName: string,
-  fraternityName: string,
-  role: UserRole
-): Promise<{ data: any; error: Error | null }> {
-  if (role === "admin") {
-    const result = await signUpAdmin(email, password, fullName, fraternityName);
-    return { data: result.data, error: result.error };
-  } else {
-    // For drivers using old signup, fraternityName is actually the org code
-    return signUpDriver(email, password, fullName, fraternityName);
+    return { data: { ...json, user: data.user }, error: null };
+  } catch (err) {
+    return { data: null, error: err as Error };
   }
 }
 
@@ -216,21 +159,4 @@ export async function getUserProfile(
   }
 
   return { data, error: null };
-}
-
-// Update profile
-export async function updateProfile(
-  userId: string,
-  updates: Partial<Profile>
-): Promise<{ error: Error | null }> {
-  const { error } = await (supabase
-    .from("profiles") as any)
-    .update(updates)
-    .eq("id", userId);
-
-  if (error) {
-    return { error: new Error(error.message) };
-  }
-
-  return { error: null };
 }

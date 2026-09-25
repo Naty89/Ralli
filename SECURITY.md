@@ -37,10 +37,11 @@ That single defect made everything else possible:
 - `POST /api/admin/signup` — admin signup now requires `ADMIN_SIGNUP_CODE`,
   validated server-side. Refuses outright when the variable is unset.
 - `/api/seed` returns 404 in production; no longer returns test credentials.
-- `lib/services/rideAccess.ts` — ride mutations require either proof of the
-  ride's stable identifier (phone or `client_id`) or a session as the owning
-  admin / assigned driver. Applied to ride `/update`, `/cancel` and
-  `/rider/confirm-presence`.
+- `lib/services/rideAccess.ts` — ride reads and mutations require either the
+  ride's random capability token or a session as the owning admin / assigned
+  driver. Applied to `GET /api/rides/[id]`, ride `/update`, `/cancel`,
+  `/rider/confirm-presence` and `/api/emergency`. (The first version of this
+  accepted the rider's phone number as proof; see Current state, section 2.)
 - Cron endpoint requires `Authorization: Bearer $CRON_SECRET`.
 
 ### Dispatch
@@ -51,7 +52,9 @@ That single defect made everything else possible:
   auto and manual assignment. Competing client-side dispatch loop removed.
 
 ### Correctness
-- Cancelling a ride frees the driver, returns the seats, drops batch items.
+- Cancelling a ride drops its batch item and recomputes the driver's status and
+  seat count from the rides still active, so a batch driver with remaining
+  stops is not freed.
 - No-show cron uses the service role so RLS no longer blocks it.
 - Auto-dispatch effect guarded against a reload/dispatch loop.
 - Added `.eslintrc.json` (lint was unconfigured) and a `typecheck` script.
@@ -60,16 +63,26 @@ That single defect made everything else possible:
 
 | Table | anon / public | authenticated |
 |---|---|---|
-| `profiles` | blocked | works |
-| `drivers` | blocked | works |
-| `events` | blocked | works |
-| `ride_requests` | blocked | works |
+| `profiles` | blocked | own row, or own organization if approved admin; read-only |
+| `drivers` | blocked | own row, or own events as admin; driver writes limited to specific columns |
+| `events` | blocked | own events as admin, assigned events as driver |
+| `ride_requests` | blocked | own events as admin, assigned rides as driver |
+| `ride_batches`, `ride_batch_items` | blocked | event staff only |
+| `emergency_events` | blocked | read/resolve only; inserts are service role |
 | `rider_penalties` | blocked | service role only |
 | `rider_consents` | blocked | service role only |
 | `rider_rate_limits` | blocked | service role only |
+| `api_rate_limits`, `dispatch_event_locks` | blocked | service role only |
 
 No table is readable with the anonymous key. Organization codes can no longer
-be harvested, so step 1 of the attack is closed.
+be harvested, so step 1 of the attack is closed. Step 4 — registering unlimited
+driver accounts off a harvested code — is additionally closed by organization
+approval: a self-registered driver stays `pending` and cannot be added to an
+event.
+
+The policy set for every table above is dropped and rebuilt by
+`20260219_org_driver_approval.sql`, so the result no longer depends on policy
+names matching `schema.sql`.
 
 Note on the migration history: the public `SELECT` policies on `events` and
 `ride_requests` were named `Enable select for all` and `Anyone can read
@@ -79,90 +92,101 @@ eventually removed through the dashboard Policies UI.
 
 ---
 
-# Remaining work
+# Current state
 
-## 1. ~~`ride_requests` and `events` are world-readable~~ — done
+The findings in [`SECURITY_REVIEW.md`](./SECURITY_REVIEW.md) are implemented in
+the application code. This section records what is in place now; the review
+document holds the reasoning and the incident history behind each item.
 
-These carried every rider's **name, phone number and pickup address**.
-Both are now closed. The rider screen no longer reads them directly:
+## 1. Rider access — closed
 
-- event lookup goes through `GET /api/events/lookup?code=`
-- ride status goes through `GET /api/rides/[id]`
-- consent is recorded via `POST /api/rider/consent`
-- consent state and cooldown are returned by `GET /api/rides`
-- the rider screen polls every 5s instead of using Supabase Realtime, which
-  enforces RLS and so cannot serve unauthenticated riders
+The rider screen holds no table access at all. Every rider read and write goes
+through a server route running with the service role:
 
-Ride creation still works because `POST /api/rides` uses the service role;
-the anonymous `INSERT` policy on `ride_requests` was removed, which also
-closes a bypass of the start-time window, rate limiting and idempotency.
+- event lookup: `GET /api/events/lookup?code=`
+- ride status: `GET /api/rides/[id]`
+- rider identity and existing-ride check: `GET /api/rider/identity`, `GET /api/rides`
+- consent: `POST /api/rider/consent`
+- presence, cancel, update, emergency: `/api/rider/confirm-presence`,
+  `/api/rides/[id]/cancel`, `/api/rides/[id]/update`, `/api/emergency`
 
-### Implementation notes
+The anonymous `INSERT` policy on `ride_requests` is gone; creation runs through
+`POST /api/rides`, which applies the event window, idempotency and rate limits.
 
-**a. `GET /api/events/lookup?code=XXXX`** (service role)
-Return only what the rider form needs: `id`, `event_name`, `start_time`,
-`event_address`, `event_lat`, `event_lng`, `batch_mode_enabled`,
-`auto_dispatch_enabled`. Then change `getEventByAccessCode()` in
-`lib/services/events.ts` to call it instead of querying `events` directly.
+The rider screen polls `GET /api/rides/[id]` every 10 seconds, stops on terminal
+ride states, and pauses while the tab is hidden. Supabase Realtime enforces RLS
+and cannot serve unauthenticated riders, so it is used only by the authenticated
+admin and driver dashboards.
 
-**b. `GET /api/rides/[id]?client_id=…&rider_phone=…`** (service role)
-- If the caller reproduces `rider_identifier_hash` → return the full ride.
-- Otherwise return a minimal status object: `id`, `status`, queue position,
-  driver first name, ETA — no phone, no address.
-Then change `getRideRequestById()` in `lib/services/rides.ts` to call it.
+Queue position is computed inside the `/api/rides/[id]` response rather than
+read from `ride_requests` with the anon key.
 
-**c. Persist rider identity for rehydration**
-`app/rider/page.tsx` restores a ride from `localStorage` using only the ride
-ID, which cannot prove ownership. Store the phone at creation time
-(`ralli_ride_phone`) alongside the existing `ralli_ride_id` and `ralli_client_id`
-so rehydration can authenticate.
+## 2. Rider authorization — capability tokens, not phone numbers
 
-**d. Replace rider realtime with polling**
-`subscribeToRideRequest()` cannot work for unauthenticated riders once RLS is
-tightened. Poll `GET /api/rides/[id]` every ~5s while a ride is active.
-Admin and driver subscriptions are unaffected — they are authenticated and
-their policies already allow it.
+`POST /api/rides` issues a 32-byte random token per ride and stores only its
+SHA-256 hash in `ride_requests.rider_access_token_hash`. The rider browser keeps
+the token in `localStorage` as `ralli_ride_access_token` and sends it in the
+`x-ralli-ride-token` header; `lib/services/rideAccess.ts` compares hashes with
+`timingSafeEqual`.
 
-**e. Move queue position server-side**
-`getQueuePosition()` reads `ride_requests` with the anon client; fold it into
-the `/api/rides/[id]` response.
+Phone numbers remain contact and idempotency data. They are no longer accepted
+as proof of ride ownership, and no rider request puts a phone number in a URL
+query string.
 
-**f. Tighten the policies**
+## 3. Profiles and driver approval
 
-```sql
-drop policy "Public can view ride requests" on ride_requests;
+Profiles are never written from the browser — `INSERT`, `UPDATE` and `DELETE`
+are revoked from `anon` and `authenticated`. A self-row policy
+(`auth.uid() = id`) restricts *which* row a user may touch but not the `role`,
+`organization_code` or `approval_status` values in it, which is why provisioning
+moved server-side entirely.
 
-drop policy "Public can view active events by access code" on events;
-```
+Driver approval is organization-wide and separate from event assignment:
 
-**g. Re-verify**
+1. `POST /api/driver/signup` validates the organization code with the service
+   role and writes a profile fixed to `role=driver`, `approval_status=pending`.
+2. An approved admin for that organization approves or rejects it from the
+   dashboard via `/api/admin/driver-applications`.
+3. That admin then adds the approved driver to a specific event. The
+   `drivers` INSERT policy calls `is_approved_driver_for_event()`, so an
+   unapproved or out-of-organization driver cannot be added even if the UI is
+   bypassed.
 
-```bash
-node scripts/find-suspicious.mjs          # section 4 should show BLOCKED
-node scripts/verify-rls-authenticated.mjs # admin reads must still work
-```
+Drivers may update only `current_lat`, `current_lng`, `last_location_update`,
+`is_online`, `current_status` and `current_passenger_load` on their own row, and
+the `guard_driver_record_update` trigger blocks a driver from moving their record
+to another event, changing vehicle capacity, self-assigning, or resetting seat
+accounting while a ride is active.
 
-### Interim stopgap (if the above is deferred)
+## 4. Dispatch and batch consistency
 
-Revoke column privileges so the anon role cannot read the sensitive columns:
+`acquire_event_dispatch_lock()` gives one dispatch runner a lease per event;
+concurrent triggers set a rerun bit instead of starting their own loop, and
+`finish_event_dispatch_pass()` drains it. Driver and ride claims are conditional
+updates, so a loser returns its seat reservation rather than leaving a driver
+marked assigned to a ride that named someone else.
 
-```sql
-revoke select on ride_requests from anon;
-grant select (
-  id, event_id, rider_name, pickup_address, pickup_lat, pickup_lng,
-  passenger_count, status, assigned_driver_id, driver_eta_minutes,
-  estimated_wait_minutes, arrival_timestamp, completion_timestamp,
-  arrival_deadline_timestamp, rider_confirmed, batch_id,
-  pickup_sequence_index, ride_direction, dropoff_address,
-  dropoff_lat, dropoff_lng, created_at, updated_at
-) on ride_requests to anon;
-```
+Cancelling or no-showing one rider in a batch removes that stop, recalculates
+batch passengers, and recomputes the driver's status and load from the rides
+that are still active — so a driver with remaining stops is not freed. Once a
+ride is `in_progress`, rider cancellation is refused and needs an admin or
+driver action.
 
-Note `rider_phone`, `rider_phone_normalized` and `rider_identifier_hash` are
-deliberately omitted. This requires changing every rider-facing query from
-`select("*")` to an explicit column list, or the queries will error.
+## 5. Public endpoint rate limits
 
-## 2. Vercel environment variables
+`api_rate_limits` plus `consume_api_rate_limit()` enforce per-IP limits in the
+database rather than in process memory, which does not survive serverless
+instances. Client IPs are hashed before storage. Covered routes: event lookup,
+rider identity, ride creation, consent, emergency, admin signup (5/hour) and
+driver signup (20/hour).
+
+## 6. Admin map rendering
+
+`components/AdminDriverMap.tsx` builds its `InfoWindow` from DOM nodes with
+`textContent`. Driver names are user-controlled and are no longer interpolated
+into an HTML string.
+
+## 7. Vercel environment variables
 
 | Variable | Value |
 |---|---|
@@ -173,32 +197,28 @@ deliberately omitted. This requires changing every rider-facing query from
 | `ADMIN_SIGNUP_CODE` | passphrase required to create admin accounts |
 | `CRON_SECRET` | random string; Vercel sends it as `Authorization: Bearer …` |
 
-## 3. Cron schedule
+## 8. Cron schedule
 
-Vercel Cron on the Hobby plan is limited to **once per day**, and a once-a-day
-sweep is useless for a 3-minute no-show deadline. It also hard-fails the
-build:
-
-```
-Error: Hobby accounts are limited to daily cron jobs.
-This cron expression (* * * * *) would run more than once per day.
-```
-
-`vercel.json` has therefore been **removed**. Use an external scheduler
-(e.g. cron-job.org, free tier is fine) pointed at:
+The no-show sweep runs once per minute through Vercel Cron, configured in
+`vercel.json`, and requires `CRON_SECRET`. This needs the Pro plan: Hobby
+accounts are limited to daily cron jobs and the build fails outright with
+`Error: Hobby accounts are limited to daily cron jobs.` If the project is ever
+downgraded, point an external scheduler at the endpoint instead:
 
 ```
 GET https://<app>.vercel.app/api/cron/process-noshow
 Authorization: Bearer <CRON_SECRET>
 ```
 
-## 4. Optional hardening
+## 9. Optional hardening not yet done
 
-- Require admin approval before a driver can join an event.
-- Enable email confirmation in Supabase (Authentication → Providers → Email),
-  otherwise signup grants an immediate session.
+- Enable email confirmation in Supabase (Authentication → Providers → Email).
+  Signup currently grants an immediate session; organization-wide approval, not
+  email verification, is what gates driver access to an event.
 - Replace the remaining `any`-typed Supabase clients with generated types
   (`npx supabase gen types typescript`).
+- Automated test coverage: the repo has one integration script and a load-test
+  harness, but no unit test suite.
 
 ## Verification commands
 
@@ -209,3 +229,8 @@ node scripts/verify-rls-authenticated.mjs  # authenticated reads still work
 node scripts/cleanup-test-users.mjs        # dry run; --apply to delete
 node scripts/remove-attacker-accounts.mjs  # dry run; --apply to delete
 ```
+
+Run `verify-rls-authenticated.mjs` while driver rows exist. During the incident
+response an anonymous read of an empty `drivers` table returned zero rows and
+was misread as proof the policy was safe; a public `SELECT` policy was in fact
+still present.

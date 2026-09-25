@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseServer";
+import { checkPublicApiRateLimit } from "@/lib/services/apiRateLimit";
 
 // Event lookup for the unauthenticated rider flow.
 //
@@ -9,6 +10,10 @@ import { createAdminClient } from "@/lib/supabaseServer";
 // actually needs - never created_by, admin_email or internal flags.
 
 export async function GET(request: Request) {
+  const rate = await checkPublicApiRateLimit(request, "event-lookup", 1000, 60);
+  if (rate.error) return NextResponse.json({ error: "Lookup temporarily unavailable" }, { status: 503 });
+  if (!rate.allowed) return NextResponse.json({ error: "Too many lookup attempts" }, { status: 429 });
+
   const url = new URL(request.url);
   const code = (url.searchParams.get("code") || "").trim().toUpperCase();
 

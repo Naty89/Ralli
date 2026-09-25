@@ -4,6 +4,7 @@
 import { createAdminClient } from "@/lib/supabaseServer";
 import { Driver, RideRequest } from "@/types/database";
 import { calculateETA, haversineDistance, orderStopsByNearestNeighbor } from "@/lib/services/geo";
+import { randomUUID } from "crypto";
 
 // Rides within this radius of the oldest waiting ride may be batched together.
 export const BATCH_RADIUS_KM = 1.0;
@@ -141,18 +142,29 @@ export async function assignSingleRide(
     etaMinutes = eta.etaMinutes;
   }
 
-  const { error: rideError } = await admin
+  const { data: claimedRide, error: rideError } = await admin
     .from("ride_requests")
     .update({
       assigned_driver_id: driver.id,
       status: "assigned",
       driver_eta_minutes: etaMinutes ?? null,
     })
-    .eq("id", ride.id);
+    .eq("id", ride.id)
+    .eq("status", "waiting")
+    .is("assigned_driver_id", null)
+    .select("id")
+    .maybeSingle();
 
   if (rideError) {
     await releaseDriver(admin, driver.id, seats);
     throw new Error(rideError.message);
+  }
+
+  // Another dispatcher may have claimed the ride while this loop was
+  // claiming its driver. Return the driver reservation and retry the queue.
+  if (!claimedRide) {
+    await releaseDriver(admin, driver.id, seats);
+    return false;
   }
 
   return true;
@@ -171,21 +183,22 @@ async function assignBatch(
   // Claim before writing any rides, so a lost race leaves nothing to undo.
   if (!(await claimDriver(admin, driver, totalPassengers))) return false;
 
-  const { data: batch, error: batchError } = await admin
-    .from("ride_batches")
-    .insert({
-      event_id: eventId,
-      driver_id: driver.id,
-      status: "pending",
-      total_passengers: totalPassengers,
-    })
-    .select()
-    .single();
-
-  let batchId: string | null = batch?.id ?? null;
+  let batchId: string | null = null;
 
   try {
+    const { data: batch, error: batchError } = await admin
+      .from("ride_batches")
+      .insert({
+        event_id: eventId,
+        driver_id: driver.id,
+        status: "pending",
+        total_passengers: totalPassengers,
+      })
+      .select("id")
+      .single();
+
     if (batchError || !batch) throw new Error(batchError?.message || "Failed to create batch");
+    batchId = batch.id;
 
     const ordered = await orderStopsByNearestNeighbor(
       driver.current_lat ?? 0,
@@ -206,11 +219,9 @@ async function assignBatch(
       picked_up: false,
     }));
 
-    const { error: itemsError } = await admin.from("ride_batch_items").insert(batchItems);
-    if (itemsError) throw new Error(itemsError.message);
-
+    const assignedStops: typeof ordered = [];
     for (const stop of ordered) {
-      const { error } = await admin
+      const { data: claimedRide, error } = await admin
         .from("ride_requests")
         .update({
           assigned_driver_id: driver.id,
@@ -219,17 +230,78 @@ async function assignBatch(
           pickup_sequence_index: stop.order,
           driver_eta_minutes: etaByRideId.get(stop.id) ?? null,
         })
-        .eq("id", stop.id);
+        .eq("id", stop.id)
+        .eq("status", "waiting")
+        .is("assigned_driver_id", null)
+        .select("id")
+        .maybeSingle();
 
       if (error) throw new Error(error.message);
+      if (claimedRide) assignedStops.push(stop);
     }
+
+    if (assignedStops.length === 0) {
+      await admin.from("ride_batches").delete().eq("id", batch.id);
+      await releaseDriver(admin, driver.id, totalPassengers);
+      return false;
+    }
+
+    const assignedIds = new Set(assignedStops.map((stop) => stop.id));
+    const assignedItems = assignedStops.map((stop, index) => {
+      const item = batchItems.find((candidate) => candidate.ride_request_id === stop.id)!;
+      return { ...item, pickup_order_index: index };
+    });
+    const { error: itemsError } = await admin.from("ride_batch_items").insert(assignedItems);
+    if (itemsError) throw new Error(itemsError.message);
+
+    for (let index = 0; index < assignedStops.length; index++) {
+      const { error } = await admin
+        .from("ride_requests")
+        .update({ pickup_sequence_index: index })
+        .eq("id", assignedStops[index].id)
+        .eq("batch_id", batch.id)
+        .eq("assigned_driver_id", driver.id);
+      if (error) throw new Error(error.message);
+    }
+
+    const assignedPassengers = rides
+      .filter((ride) => assignedIds.has(ride.id))
+      .reduce((sum, ride) => sum + (ride.passenger_count || 0), 0);
+
+    const { error: batchUpdateError } = await admin
+      .from("ride_batches")
+      .update({ total_passengers: assignedPassengers })
+      .eq("id", batch.id);
+    if (batchUpdateError) throw new Error(batchUpdateError.message);
+
+    const { error: loadError } = await admin
+      .from("drivers")
+      .update({ current_passenger_load: (driver.current_passenger_load || 0) + assignedPassengers })
+      .eq("id", driver.id)
+      .eq("current_status", "assigned");
+    if (loadError) throw new Error(loadError.message);
   } catch (err) {
     // Undo the partial batch and hand the driver back.
     if (batchId) {
+      await admin
+        .from("ride_requests")
+        .update({
+          assigned_driver_id: null,
+          batch_id: null,
+          status: "waiting",
+          pickup_sequence_index: null,
+          driver_eta_minutes: null,
+        })
+        .eq("batch_id", batchId)
+        .eq("assigned_driver_id", driver.id)
+        .eq("status", "assigned");
       await admin.from("ride_batch_items").delete().eq("batch_id", batchId);
       await admin.from("ride_batches").delete().eq("id", batchId);
     }
     await releaseDriver(admin, driver.id, totalPassengers);
+    if (err instanceof Error && err.message === "All candidate rides were claimed by another dispatcher") {
+      return false;
+    }
     throw err;
   }
 
@@ -368,22 +440,67 @@ export async function autoAssignNextRide(
 }
 
 // Auto-assign everything that can be assigned right now.
+//
+// `budgetMs` bounds how long one invocation drains the queue. Ride creation
+// awaits this call, so an unbounded drain makes one unlucky rider wait for the
+// whole event's backlog - a 600-ride ramp produced a 26s submit. Worse, if the
+// serverless function were killed mid-drain the `finally` would never run and
+// the lease would keep dispatch frozen until it expired. A short budget plus a
+// lease only slightly longer than the platform timeout keeps both bounded; the
+// per-minute cron picks up anything a truncated pass left waiting.
 export async function autoAssignAllRides(
-  eventId: string
-): Promise<{ assignedCount: number; error: Error | null }> {
+  eventId: string,
+  options: { budgetMs?: number; leaseSeconds?: number } = {}
+): Promise<{ assignedCount: number; timedOut: boolean; error: Error | null }> {
+  const budgetMs = options.budgetMs ?? 8000;
+  const leaseSeconds = options.leaseSeconds ?? 60;
+  const deadline = Date.now() + budgetMs;
+
   let assignedCount = 0;
+  let timedOut = false;
+  const admin = createAdminClient();
+  const lockToken = randomUUID();
 
-  for (let i = 0; i < MAX_ASSIGN_ITERATIONS; i++) {
-    const { assigned, contested, error } = await autoAssignNextRide(eventId);
-    if (error) return { assignedCount, error };
-    if (assigned) {
-      assignedCount++;
-      continue;
+  const { data: acquired, error: lockError } = await admin.rpc("acquire_event_dispatch_lock", {
+    p_event_id: eventId,
+    p_lock_token: lockToken,
+    p_lease_seconds: leaseSeconds,
+  });
+  if (lockError) return { assignedCount, timedOut, error: new Error(lockError.message) };
+  if (!acquired) return { assignedCount, timedOut, error: null };
+
+  try {
+    for (let i = 0; i < MAX_ASSIGN_ITERATIONS; i++) {
+      if (Date.now() >= deadline) {
+        timedOut = true;
+        break;
+      }
+
+      const { assigned, contested, error } = await autoAssignNextRide(eventId);
+      if (error) return { assignedCount, timedOut, error };
+      if (assigned) {
+        assignedCount++;
+        continue;
+      }
+
+      // A concurrent request arrived while this runner was draining the
+      // queue. The database lock coalesces it into one additional pass.
+      if (contested) continue;
+
+      const { data: shouldRerun, error: finishError } = await admin.rpc(
+        "finish_event_dispatch_pass",
+        { p_event_id: eventId, p_lock_token: lockToken, p_lease_seconds: leaseSeconds }
+      );
+      if (finishError) return { assignedCount, timedOut, error: new Error(finishError.message) };
+      if (shouldRerun) continue;
+      break;
     }
-    // Lost a driver to a concurrent dispatch loop: try the next one rather
-    // than giving up, so overlapping bursts still clear the queue.
-    if (!contested) break;
-  }
 
-  return { assignedCount, error: null };
+    return { assignedCount, timedOut, error: null };
+  } finally {
+    await admin.rpc("release_event_dispatch_lock", {
+      p_event_id: eventId,
+      p_lock_token: lockToken,
+    });
+  }
 }

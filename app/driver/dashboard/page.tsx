@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Car,
@@ -31,6 +31,7 @@ import { subscribeToRideRequest, cancelRideRequest } from "@/lib/services/rides"
 import { getEventById } from "@/lib/services/events";
 import { transitionRideStatus } from "@/lib/services/dispatchService";
 import { updateRideETA, formatETA } from "@/lib/services/etaService";
+import { haversineDistance } from "@/lib/services/geo";
 import { triggerEmergency } from "@/lib/services/emergencyService";
 import {
   getDriverActiveBatch,
@@ -52,6 +53,7 @@ export default function DriverDashboardPage() {
   const [activeBatch, setActiveBatch] = useState<RideBatch | null>(null);
   const [currentPickupIndex, setCurrentPickupIndex] = useState(0);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const lastLocationWrite = useRef<{ lat: number; lng: number; at: number } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -88,15 +90,23 @@ export default function DriverDashboardPage() {
     if (!driver || driver.current_status === "offline") return;
 
     let watchId: number;
+    lastLocationWrite.current = null;
 
     if ("geolocation" in navigator) {
       watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          updateDriverLocation(
-            driver.id,
-            position.coords.latitude,
-            position.coords.longitude
-          );
+        async (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const now = Date.now();
+          const previous = lastLocationWrite.current;
+          const movedKm = previous ? haversineDistance(previous.lat, previous.lng, lat, lng) : Infinity;
+
+          // GPS can fire every second. Persist at most every 10s unless the
+          // driver has moved 25m, reducing writes while keeping the map useful.
+          if (previous && now - previous.at < 10000 && movedKm < 0.025) return;
+
+          const { error } = await updateDriverLocation(driver.id, lat, lng);
+          if (!error) lastLocationWrite.current = { lat, lng, at: now };
         },
         (error) => {
           console.error("Geolocation error:", error);
@@ -272,6 +282,36 @@ export default function DriverDashboardPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+      </div>
+    );
+  }
+
+  if (profile?.role === "driver" && profile.approval_status === "pending") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <Card className="max-w-md w-full text-center py-8">
+          <Clock className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold mb-2">Application Pending</h2>
+          <p className="text-dark-400 mb-6">
+            An admin for {profile.fraternity_name} needs to approve your driver profile. Once approved, an admin can add you to an event.
+          </p>
+          <Button className="mr-2" onClick={loadData}>Refresh status</Button>
+          <Button variant="secondary" onClick={handleSignOut}>Sign Out</Button>
+        </Card>
+      </div>
+    );
+  }
+
+  if (profile?.role === "driver" && profile.approval_status === "rejected") {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <Card className="max-w-md w-full text-center py-8">
+          <Car className="h-12 w-12 text-red-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold mb-2">Application Not Approved</h2>
+          <p className="text-dark-400 mb-6">Contact an admin for {profile.fraternity_name} if you believe this is a mistake.</p>
+          <Button className="mr-2" onClick={loadData}>Refresh status</Button>
+          <Button variant="secondary" onClick={handleSignOut}>Sign Out</Button>
+        </Card>
       </div>
     );
   }

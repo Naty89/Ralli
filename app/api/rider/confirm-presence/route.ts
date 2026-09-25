@@ -20,8 +20,7 @@ export async function POST(request: Request) {
     }
 
     const auth = await authorizeRideMutation(request, rideId, {
-      rider_phone: body?.rider_phone ?? null,
-      client_id: body?.client_id ?? null,
+      access_token: body?.access_token ?? null,
     });
 
     if (!auth.ok) {

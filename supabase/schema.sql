@@ -16,6 +16,9 @@ CREATE TYPE ride_status AS ENUM ('waiting', 'assigned', 'in_progress', 'complete
 CREATE TABLE profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     role user_role NOT NULL DEFAULT 'driver',
+    approval_status TEXT NOT NULL DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+    approval_decided_at TIMESTAMPTZ,
+    approval_decided_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
     full_name TEXT NOT NULL,
     fraternity_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -78,6 +81,7 @@ CREATE TABLE ride_requests (
     passenger_count INTEGER NOT NULL CHECK (passenger_count >= 1 AND passenger_count <= 4),
     status ride_status NOT NULL DEFAULT 'waiting',
     assigned_driver_id UUID REFERENCES drivers(id) ON DELETE SET NULL,
+    rider_access_token_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -129,10 +133,9 @@ CREATE POLICY "Users can view own profile"
     ON profiles FOR SELECT
     USING (auth.uid() = id);
 
--- Users can update their own profile
-CREATE POLICY "Users can update own profile"
-    ON profiles FOR UPDATE
-    USING (auth.uid() = id);
+-- Profile inserts and protected-field updates are performed by server routes
+-- using the service role. Do not add self INSERT/UPDATE policies here: row
+-- ownership alone does not stop a user changing their own role or organization.
 
 -- Admins can view all profiles in their fraternity
 CREATE POLICY "Admins can view fraternity profiles"

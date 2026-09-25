@@ -21,8 +21,7 @@ export async function POST(
   }
 
   const auth = await authorizeRideMutation(request, rideId, {
-    rider_phone: body.rider_phone ?? null,
-    client_id: body.client_id ?? null,
+    access_token: body.access_token ?? null,
   });
 
   if (!auth.ok) {
@@ -40,37 +39,24 @@ export async function POST(
   try {
     const admin = createAdminClient();
 
-    const { error } = await admin
+    const { data: cancelled, error } = await admin
       .from("ride_requests")
       .update({ status: "cancelled" })
-      .eq("id", rideId);
+      .eq("id", rideId)
+      .eq("status", ride.status)
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       console.error(`[Cancel Ride] Error canceling ride ${rideId}:`, error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Free the driver and give the seats back, otherwise they stay "assigned"
-    // forever and never receive another ride.
-    if (ride.assigned_driver_id) {
-      const { data: driver } = await admin
-        .from("drivers")
-        .select("id, current_passenger_load")
-        .eq("id", ride.assigned_driver_id)
-        .maybeSingle();
-
-      if (driver) {
-        await admin
-          .from("drivers")
-          .update({
-            current_status: "available",
-            current_passenger_load: Math.max(
-              0,
-              (driver.current_passenger_load || 0) - (ride.passenger_count || 0)
-            ),
-          })
-          .eq("id", driver.id);
-      }
+    if (!cancelled) {
+      return NextResponse.json(
+        { error: "Ride changed while cancellation was being processed" },
+        { status: 409 }
+      );
     }
 
     // Cancel any pending batch entry so drivers don't see a stale pickup.
@@ -80,6 +66,49 @@ export async function POST(
         .delete()
         .eq("batch_id", ride.batch_id)
         .eq("ride_request_id", rideId);
+
+      const { data: remainingBatchRides } = await admin
+        .from("ride_requests")
+        .select("passenger_count")
+        .eq("batch_id", ride.batch_id)
+        .in("status", ["assigned", "arrived", "in_progress"]);
+
+      const batchPassengers = (remainingBatchRides ?? []).reduce(
+        (sum, row) => sum + (row.passenger_count || 0),
+        0
+      );
+
+      await admin
+        .from("ride_batches")
+        .update({
+          total_passengers: batchPassengers,
+          ...(batchPassengers === 0 ? { status: "cancelled" } : {}),
+        })
+        .eq("id", ride.batch_id);
+    }
+
+    // Recompute the driver's assignment/load from remaining active rides.
+    // Cancelling one member of a batch must not free a driver who still has
+    // other stops assigned.
+    if (ride.assigned_driver_id) {
+      const { data: remainingRides } = await admin
+        .from("ride_requests")
+        .select("passenger_count")
+        .eq("assigned_driver_id", ride.assigned_driver_id)
+        .in("status", ["assigned", "arrived", "in_progress"]);
+
+      const remainingPassengers = (remainingRides ?? []).reduce(
+        (sum, row) => sum + (row.passenger_count || 0),
+        0
+      );
+
+      await admin
+        .from("drivers")
+        .update({
+          current_status: remainingRides?.length ? "assigned" : "available",
+          current_passenger_load: remainingPassengers,
+        })
+        .eq("id", ride.assigned_driver_id);
     }
 
     console.log(`[Cancel Ride] Successfully canceled ride ${rideId}`);

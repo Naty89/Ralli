@@ -5,6 +5,8 @@ import {
   autoAssignAllRides,
 } from "@/lib/services/rides-dispatch";
 
+export const maxDuration = 60;
+
 // Dispatch runs entirely server-side so it can bypass RLS, use the service
 // role for writes, and apply the same batching rules as ride creation.
 // Body: { event_id } for auto-dispatch, or
@@ -77,10 +79,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ assignedCount: 1 });
   }
 
-  const { assignedCount, error } = await autoAssignAllRides(eventId);
+  // An admin pressing dispatch is waiting on purpose, so allow a long pass -
+  // but stay under this route's 60s maxDuration so the lock is always released.
+  const { assignedCount, timedOut, error } = await autoAssignAllRides(eventId, {
+    budgetMs: 45_000,
+  });
   if (error) {
     return NextResponse.json({ error: error.message, assignedCount }, { status: 500 });
   }
 
-  return NextResponse.json({ assignedCount });
+  return NextResponse.json({ assignedCount, timedOut });
 }

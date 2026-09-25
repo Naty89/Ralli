@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabaseServer";
 import nodeCrypto from "crypto";
+import { checkPublicApiRateLimit } from "@/lib/services/apiRateLimit";
 
 // Record rider TOS consent.
 //
@@ -15,6 +16,10 @@ function normalizePhone(phone?: string | null): string | null {
 }
 
 export async function POST(request: Request) {
+  const rate = await checkPublicApiRateLimit(request, "rider-consent", 1000, 60);
+  if (rate.error) return NextResponse.json({ error: "Consent temporarily unavailable" }, { status: 503 });
+  if (!rate.allowed) return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+
   let body: any;
   try {
     body = await request.json();
@@ -37,9 +42,13 @@ export async function POST(request: Request) {
     );
   }
 
+  // Consent is browser/event-scoped, not phone-authenticated. Prefer the
+  // persistent random client id so entering someone else's phone cannot mark
+  // their consent record.
+  const consentSeed = clientId ?? phone;
   const identifier = nodeCrypto
     .createHash("sha256")
-    .update(`${eventId}:${phone ?? clientId}`)
+    .update(`${eventId}:${consentSeed}`)
     .digest("hex");
 
   const admin = createAdminClient();

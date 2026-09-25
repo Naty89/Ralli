@@ -4,11 +4,9 @@ import { Event, CreateEventInput } from "@/types/database";
 // Generate a random 6-character access code
 function generateAccessCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let result = "";
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+  const random = new Uint8Array(6);
+  globalThis.crypto.getRandomValues(random);
+  return Array.from(random, (byte) => chars.charAt(byte % chars.length)).join("");
 }
 
 // Create a new event

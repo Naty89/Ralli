@@ -2,10 +2,8 @@ export * from "./auth";
 export * from "./events";
 export * from "./rides";
 export * from "./drivers";
-// Dispatch service has duplicate assignDriverToRide - import directly from dispatchService if needed
-// dispatchService has duplicate assignDriverToRide - import directly from
-// dispatchService if needed. Auto/batch dispatch lives in "rides-dispatch"
-// (server-only) and is intentionally not re-exported here.
+// Auto/batch dispatch lives in "rides-dispatch" (server-only) and is
+// intentionally not re-exported from the browser-safe service barrel.
 export {
   haversineDistance,
   findNearestDriver,

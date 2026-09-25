@@ -252,8 +252,13 @@ export default function AdminEventPage() {
     loadAnalytics();
   };
 
-  const handleNoShow = async (rideId: string, driverId?: string) => {
-    await transitionRideStatus(rideId, "no_show", driverId);
+  const handleNoShow = async (rideId: string) => {
+    const response = await fetch(`/api/admin/rides/${rideId}/no-show`, { method: "POST" });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      setDispatchError(result.error || "Failed to mark ride as no-show");
+      return;
+    }
     loadRides();
     loadDrivers();
     loadAnalytics();
@@ -712,7 +717,7 @@ export default function AdminEventPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => handleNoShow(ride.id, ride.assigned_driver_id)}
+                              onClick={() => handleNoShow(ride.id)}
                               title="Mark as No Show"
                               className="min-h-[44px] min-w-[44px] p-0"
                             >

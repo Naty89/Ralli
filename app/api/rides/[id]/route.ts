@@ -19,17 +19,15 @@ export async function GET(
     return NextResponse.json({ error: "Ride ID required" }, { status: 400 });
   }
 
-  const url = new URL(request.url);
-
   const auth = await authorizeRideMutation(request, rideId, {
-    rider_phone: url.searchParams.get("rider_phone"),
-    client_id: url.searchParams.get("client_id"),
+    access_token: request.headers.get("x-ralli-ride-token"),
   });
 
   // Deliberately 404 rather than 403 so the endpoint cannot be used to probe
   // which ride ids exist.
   if (!auth.ok) {
-    return NextResponse.json({ error: "Ride not found" }, { status: 404 });
+    const status = auth.status >= 500 ? auth.status : 404;
+    return NextResponse.json({ error: status === 404 ? "Ride not found" : auth.error }, { status });
   }
 
   const ride = auth.ride;
@@ -96,8 +94,15 @@ export async function GET(
     }
   }
 
+  const {
+    rider_access_token_hash: _tokenHash,
+    rider_identifier_hash: _identifierHash,
+    rider_phone_normalized: _normalizedPhone,
+    ...publicRide
+  } = ride;
+
   return NextResponse.json({
-    ride: { ...ride, driver: driver ?? undefined },
+    ride: { ...publicRide, driver: driver ?? undefined },
     position: index >= 0 ? index + 1 : 0,
     total: waitingList.length,
     batch,

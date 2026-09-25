@@ -49,8 +49,13 @@ async function postRide(payload) {
   const r1 = await postRide(payload);
   console.log('First response:', r1.status, r1.body && r1.body.data && r1.body.data.id);
 
-  console.log('Posting second (idempotent) ride with same payload...');
-  const r2 = await postRide(payload);
+  if (!r1.body?.access_token) {
+    console.error('First response did not include a ride access token:', r1);
+    process.exit(1);
+  }
+
+  console.log('Posting second (idempotent) ride with the capability token...');
+  const r2 = await postRide({ ...payload, access_token: r1.body.access_token });
   console.log('Second response:', r2.status, r2.body && r2.body.data && r2.body.data.id);
 
   const id1 = r1.body && r1.body.data && r1.body.data.id;

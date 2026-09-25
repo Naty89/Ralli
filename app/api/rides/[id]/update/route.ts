@@ -30,8 +30,7 @@ export async function POST(
   } = body;
 
   const auth = await authorizeRideMutation(request, rideId, {
-    rider_phone: body.rider_phone ?? null,
-    client_id: body.client_id ?? null,
+    access_token: body.access_token ?? null,
   });
 
   if (!auth.ok) {
@@ -46,11 +45,29 @@ export async function POST(
     );
   }
 
-  if (passenger_count !== undefined && (passenger_count < 1 || passenger_count > 4)) {
+  if (passenger_count !== undefined && (!Number.isInteger(passenger_count) || passenger_count < 1 || passenger_count > 4)) {
     return NextResponse.json(
       { error: "Passenger count must be between 1 and 4" },
       { status: 400 }
     );
+  }
+  if (pickup_address !== undefined && (typeof pickup_address !== "string" || !pickup_address.trim() || pickup_address.length > 500)) {
+    return NextResponse.json({ error: "Invalid pickup address" }, { status: 400 });
+  }
+  if (pickup_lat !== undefined && (typeof pickup_lat !== "number" || !Number.isFinite(pickup_lat) || pickup_lat < -90 || pickup_lat > 90)) {
+    return NextResponse.json({ error: "Invalid pickup latitude" }, { status: 400 });
+  }
+  if (pickup_lng !== undefined && (typeof pickup_lng !== "number" || !Number.isFinite(pickup_lng) || pickup_lng < -180 || pickup_lng > 180)) {
+    return NextResponse.json({ error: "Invalid pickup longitude" }, { status: 400 });
+  }
+  if (dropoff_address !== undefined && (typeof dropoff_address !== "string" || dropoff_address.length > 500)) {
+    return NextResponse.json({ error: "Invalid dropoff address" }, { status: 400 });
+  }
+  if (dropoff_lat !== undefined && (typeof dropoff_lat !== "number" || !Number.isFinite(dropoff_lat) || dropoff_lat < -90 || dropoff_lat > 90)) {
+    return NextResponse.json({ error: "Invalid dropoff latitude" }, { status: 400 });
+  }
+  if (dropoff_lng !== undefined && (typeof dropoff_lng !== "number" || !Number.isFinite(dropoff_lng) || dropoff_lng < -180 || dropoff_lng > 180)) {
+    return NextResponse.json({ error: "Invalid dropoff longitude" }, { status: 400 });
   }
 
   try {
@@ -84,7 +101,13 @@ export async function POST(
     }
 
     console.log(`[Update Ride] Successfully updated ride ${rideId}`);
-    return NextResponse.json({ data });
+    const {
+      rider_access_token_hash: _tokenHash,
+      rider_identifier_hash: _identifierHash,
+      rider_phone_normalized: _normalizedPhone,
+      ...publicRide
+    } = data;
+    return NextResponse.json({ data: publicRide });
   } catch (err) {
     console.error(`[Update Ride] Unexpected error:`, err);
     return NextResponse.json(

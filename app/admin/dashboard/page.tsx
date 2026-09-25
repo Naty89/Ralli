@@ -28,6 +28,9 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
+  const [driverApplications, setDriverApplications] = useState<Array<Profile & { email?: string | null }>>([]);
+  const [applicationError, setApplicationError] = useState("");
+  const [processingApplication, setProcessingApplication] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -70,7 +73,37 @@ export default function AdminDashboardPage() {
 
     const { data: eventsData } = await getAdminEvents(profile.id);
     setEvents(eventsData);
+
+    const applicationsResponse = await fetch("/api/admin/driver-applications");
+    const applicationsJson = await applicationsResponse.json().catch(() => ({}));
+    if (applicationsResponse.ok) {
+      setDriverApplications(applicationsJson.data ?? []);
+    } else {
+      setApplicationError(applicationsJson.error ?? "Failed to load driver applications");
+    }
     setIsLoading(false);
+  };
+
+  const handleDriverDecision = async (driverProfileId: string, decision: "approved" | "rejected") => {
+    setProcessingApplication(driverProfileId);
+    setApplicationError("");
+    try {
+      const response = await fetch("/api/admin/driver-applications", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_id: driverProfileId, decision }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setApplicationError(json.error ?? "Failed to update driver application");
+      } else {
+        setDriverApplications((current) => current.filter((application) => application.id !== driverProfileId));
+      }
+    } catch {
+      setApplicationError("Unable to reach the server");
+    } finally {
+      setProcessingApplication(null);
+    }
   };
 
   const handleSignOut = async () => {
@@ -122,7 +155,7 @@ export default function AdminDashboardPage() {
           <div className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="min-w-0">
               <p className="text-sm text-dark-400 mb-1">Your Driver Code</p>
-              <p className="text-xs text-dark-500">Share this with drivers to join your organization</p>
+              <p className="text-xs text-dark-500">Share this with prospective drivers. An admin must approve each application.</p>
             </div>
             <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
               <span className="text-xl sm:text-2xl font-mono font-bold tracking-widest text-primary-400 break-all">
@@ -141,6 +174,64 @@ export default function AdminDashboardPage() {
               </button>
             </div>
           </div>
+        </Card>
+
+        {/* Organization-wide driver approvals */}
+        <Card className="mb-6 sm:mb-8">
+          <CardHeader>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle>Driver Applications</CardTitle>
+                <p className="text-sm text-dark-400 mt-1">
+                  Approve a driver once for your organization; add approved drivers to events separately.
+                </p>
+              </div>
+              <Badge variant={driverApplications.some((application) => application.approval_status === "pending") ? "waiting" : "available"}>
+                {driverApplications.filter((application) => application.approval_status === "pending").length} pending
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {applicationError && <p className="text-sm text-red-400 mb-3">{applicationError}</p>}
+            {driverApplications.length === 0 ? (
+              <p className="text-sm text-dark-500">No driver applications need a decision.</p>
+            ) : (
+              <div className="space-y-3">
+                {driverApplications.map((application) => (
+                  <div key={application.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-dark-800 pt-3">
+                    <div>
+                      <p className="font-medium">{application.full_name}</p>
+                      {application.email && <p className="text-sm text-dark-400">{application.email}</p>}
+                      <p className="text-xs text-dark-500">
+                        {application.approval_status === "rejected" ? "Previously rejected · " : ""}
+                        Applied {new Date(application.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="success"
+                        isLoading={processingApplication === application.id}
+                        onClick={() => handleDriverDecision(application.id, "approved")}
+                      >
+                        Approve
+                      </Button>
+                      {application.approval_status === "pending" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={processingApplication === application.id}
+                          onClick={() => handleDriverDecision(application.id, "rejected")}
+                        >
+                          Reject
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
         </Card>
 
         {/* Page Header */}

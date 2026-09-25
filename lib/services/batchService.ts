@@ -20,7 +20,7 @@ export function generateClusterKey(lat: number, lng: number): string {
 }
 
 // Get waiting rides grouped by cluster
-export async function getWaitingRidesByCluster(
+async function getWaitingRidesByCluster(
   eventId: string
 ): Promise<{ data: RideCluster[] | null; error: Error | null }> {
   try {
@@ -87,7 +87,7 @@ export async function getWaitingRidesByCluster(
 
 // Find available drivers with sufficient capacity.
 // Location is optional: prefer drivers with location for distance sorting, but include drivers without (e.g. desktop).
-export async function findAvailableDriversWithCapacity(
+async function findAvailableDriversWithCapacity(
   eventId: string,
   requiredCapacity: number
 ): Promise<{ data: Driver[] | null; error: Error | null }> {
@@ -116,7 +116,7 @@ export async function findAvailableDriversWithCapacity(
 }
 
 // Calculate optimal pickup order using nearest-neighbor algorithm
-export async function calculatePickupOrder(
+async function calculatePickupOrder(
   driverLat: number,
   driverLng: number,
   rides: Array<{ id: string; pickup_lat: number; pickup_lng: number }>
@@ -135,7 +135,7 @@ export async function calculatePickupOrder(
 }
 
 // Create a batch with multiple rides
-export async function createBatch(
+async function createBatch(
   eventId: string,
   driverId: string,
   rideIds: string[]
@@ -418,7 +418,7 @@ export async function completeBatch(
 }
 
 // Batch dispatch: find clusters and assign to drivers
-export async function batchDispatch(
+async function batchDispatch(
   eventId: string
 ): Promise<{
   batchesCreated: number;
@@ -575,54 +575,4 @@ export function subscribeToBatchItems(
       }
     )
     .subscribe();
-}
-
-// Get batch position info for a ride (for rider display)
-export async function getRideBatchPosition(
-  rideId: string
-): Promise<{
-  data: {
-    batch_id: string;
-    position: number;
-    total_stops: number;
-    estimated_arrival: string | null;
-  } | null;
-  error: Error | null;
-}> {
-  try {
-    const { data: ride, error: rideError } = await supabase
-      .from("ride_requests")
-      .select("batch_id, pickup_sequence_index")
-      .eq("id", rideId)
-      .single();
-
-    if (rideError || !ride || !ride.batch_id) {
-      return { data: null, error: null }; // Not in a batch
-    }
-
-    // Get total items in batch
-    const { data: items, error: itemsError } = await supabase
-      .from("ride_batch_items")
-      .select("id, estimated_arrival_time")
-      .eq("batch_id", ride.batch_id)
-      .eq("ride_request_id", rideId)
-      .single();
-
-    const { count } = await supabase
-      .from("ride_batch_items")
-      .select("id", { count: "exact", head: true })
-      .eq("batch_id", ride.batch_id);
-
-    return {
-      data: {
-        batch_id: ride.batch_id,
-        position: (ride.pickup_sequence_index || 0) + 1,
-        total_stops: count || 1,
-        estimated_arrival: items?.estimated_arrival_time || null,
-      },
-      error: null,
-    };
-  } catch (err) {
-    return { data: null, error: err as Error };
-  }
 }

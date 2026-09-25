@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, useCallback } from "react";
+import { useState, useEffect, Suspense, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Car,
@@ -13,7 +13,6 @@ import {
   Loader2,
   Timer,
   MapPinned,
-  AlertTriangle,
   Hand,
 } from "lucide-react";
 import { Button } from "@/components/ui";
@@ -49,6 +48,7 @@ function RiderContent() {
   const [accessCode, setAccessCode] = useState(initialCode);
   const [event, setEvent] = useState<Event | null>(null);
   const [rideRequest, setRideRequest] = useState<RideRequest | null>(null);
+  const [rideAccessToken, setRideAccessToken] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState({ position: 0, total: 0 });
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -65,12 +65,12 @@ function RiderContent() {
   const [dropoffLng, setDropoffLng] = useState(0);
 
   const [isLoading, setIsLoading] = useState(false);
+  const rideSubmitLock = useRef(false);
   const [error, setError] = useState("");
 
   // Phase 2.5: Safety features state
   const [showTOSModal, setShowTOSModal] = useState(false);
   const [hasConsent, setHasConsent] = useState(false);
-  const [riderHash, setRiderHash] = useState("");
   const [clientId, setClientId] = useState<string | null>(null);
   const [cooldownStatus, setCooldownStatus] = useState<CooldownStatus | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -84,9 +84,6 @@ function RiderContent() {
     estimated_arrival: string | null;
   } | null>(null);
 
-  // Existing ride modal state
-  const [showExistingRideModal, setShowExistingRideModal] = useState(false);
-  const [existingRideData, setExistingRideData] = useState<RideRequest | null>(null);
   const [isEditingRide, setIsEditingRide] = useState(false);
 
   // Check initial code
@@ -96,19 +93,22 @@ function RiderContent() {
     }
   }, []);
 
-  // Client-side rehydration: check localStorage for existing ride id.
-  // The phone is stored alongside the id so the rider can prove ownership of
-  // the ride (ride_requests has no public read policy).
+  // Client-side rehydration uses the unguessable capability returned by the
+  // server, not a phone number (which is contact data, not authentication).
   useEffect(() => {
     const tryRehydrate = async () => {
       try {
         const stored = localStorage.getItem("ralli_ride_id");
+        const storedAccessToken = localStorage.getItem("ralli_ride_access_token");
         if (!stored) return;
 
-        const storedPhone = localStorage.getItem("ralli_ride_phone");
+        if (!storedAccessToken) {
+          localStorage.removeItem("ralli_ride_id");
+          return;
+        }
+
         const { data, error } = await getRideRequestById(stored, {
-          rider_phone: storedPhone,
-          client_id: clientId,
+          access_token: storedAccessToken,
         });
 
         if (error || !data) {
@@ -118,10 +118,13 @@ function RiderContent() {
 
         // If ride is still active, set and show status
         if (["waiting", "assigned", "arrived", "in_progress"].includes(data.ride.status)) {
+          setRideAccessToken(storedAccessToken);
           applyRideStatus(data);
           setStep("status");
         } else {
           localStorage.removeItem("ralli_ride_id");
+          localStorage.removeItem("ralli_ride_access_token");
+          setRideAccessToken(null);
         }
       } catch (err) {
         // ignore
@@ -157,7 +160,7 @@ function RiderContent() {
         const newCid = (typeof crypto !== "undefined" && (crypto as any).randomUUID)
           ? (crypto as any).randomUUID()
           : `c_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-        localStorage.setItem("ralli_client_id", newCid);
+      localStorage.setItem("ralli_client_id", newCid);
         cid = newCid;
       }
       setClientId(cid);
@@ -209,8 +212,7 @@ function RiderContent() {
         return;
       }
       const { data } = await getRideRequestById(rideRequest.id, {
-        rider_phone: rideRequest.rider_phone,
-        client_id: clientId,
+        access_token: rideAccessToken,
       });
       if (!cancelled && data) applyRideStatus(data);
     };
@@ -228,7 +230,7 @@ function RiderContent() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [rideRequest?.id, rideRequest?.rider_phone, rideRequest?.status, clientId, applyRideStatus]);
+  }, [rideRequest?.id, rideRequest?.status, rideAccessToken, applyRideStatus]);
 
   const handleCodeSubmit = async () => {
     if (!accessCode.trim()) {
@@ -263,32 +265,20 @@ function RiderContent() {
 
   // Check TOS consent and cooldown when name changes
   const checkRiderStatus = useCallback(async () => {
-    if (!event || !riderName.trim()) return;
+    if (!event || !riderName.trim() || !clientId) return;
 
-    // Request server to generate stable rider identifier (uses IP + UA)
     try {
-      const params = new URLSearchParams({
-        event_id: event.id,
-        rider_name: riderName.trim(),
+      const resp = await fetch("/api/rider/identity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: event.id, client_id: clientId }),
       });
-      if (clientId) params.set("client_id", clientId);
-
-      const resp = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
       const json = await resp.json();
-      if (json) {
-        const identifier = json.identifier || (json.data && json.data.rider_identifier_hash) || null;
-        if (identifier) {
-          setRiderHash(identifier);
-        }
-        // Consent and cooldown are read from the service-role response;
-        // rider_consents and rider_penalties are no longer publicly readable.
-        setHasConsent(!!json.has_consent);
-        setCooldownStatus(json.cooldown ?? null);
-      }
+      if (resp.ok) setHasConsent(!!json.has_consent);
     } catch (err) {
       console.error("Failed to identify rider:", err);
     }
-  }, [event, riderName]);
+  }, [event, riderName, clientId]);
 
   useEffect(() => {
     const timer = setTimeout(checkRiderStatus, 500);
@@ -309,10 +299,11 @@ function RiderContent() {
   // Persist the ride id plus the phone. The phone is required because
   // GET /api/rides/[id] only returns a ride to a caller who can prove they
   // own it, and the identifier is derived from the phone.
-  const persistRide = ({ id, phone }: { id: string; phone?: string | null }) => {
+  const persistRide = ({ id, accessToken }: { id: string; accessToken: string }) => {
     try {
       localStorage.setItem("ralli_ride_id", id);
-      if (phone) localStorage.setItem("ralli_ride_phone", phone);
+      localStorage.setItem("ralli_ride_access_token", accessToken);
+      setRideAccessToken(accessToken);
     } catch {}
   };
 
@@ -322,8 +313,7 @@ function RiderContent() {
 
     setIsConfirming(true);
     const { success, error } = await confirmRiderPresence(rideRequest.id, {
-      rider_phone: rideRequest.rider_phone,
-      client_id: clientId,
+      access_token: rideAccessToken,
     });
 
     if (success) {
@@ -344,7 +334,8 @@ function RiderContent() {
       "rider",
       riderName || "Unknown Rider",
       userLocation?.lat,
-      userLocation?.lng
+      userLocation?.lng,
+      { access_token: rideAccessToken }
     );
   };
 
@@ -358,8 +349,7 @@ function RiderContent() {
 
     setIsConfirming(true);
     const { error } = await cancelRideRequest(rideRequest.id, {
-      rider_phone: rideRequest.rider_phone,
-      client_id: clientId,
+      access_token: rideAccessToken,
     });
 
     if (error) {
@@ -373,8 +363,9 @@ function RiderContent() {
       setDriverLocation(null);
       try {
         localStorage.removeItem("ralli_ride_id");
-        localStorage.removeItem("ralli_ride_phone");
+        localStorage.removeItem("ralli_ride_access_token");
       } catch {}
+      setRideAccessToken(null);
       setStep("form");
     }
     setIsConfirming(false);
@@ -401,54 +392,9 @@ function RiderContent() {
     setStep("form");
   };
 
-  // Handle "View Existing Ride" - show current ride status
-  const handleViewExistingRide = async () => {
-    if (!existingRideData) return;
-
-    setRideRequest(existingRideData);
-    setShowExistingRideModal(false);
-    setError("");
-
-    // Store ride id (and phone, to prove ownership on reload)
-    persistRide({
-      id: existingRideData.id,
-      phone: existingRideData.rider_phone ?? riderPhone,
-    });
-
-    // Queue position comes from the status payload
-    const status = await getRideRequestById(existingRideData.id, {
-      rider_phone: existingRideData.rider_phone ?? riderPhone,
-      client_id: clientId,
-    });
-    if (status.data) applyRideStatus(status.data);
-
-    setStep("status");
-  };
-
-  // Handle "Edit Existing Ride" - go back to form with existing data
-  const handleEditExistingRide = () => {
-    if (!existingRideData) return;
-
-    setRiderName(existingRideData.rider_name);
-    setRiderPhone(existingRideData.rider_phone || "");
-    setPickupAddress(existingRideData.pickup_address);
-    setPickupLat(existingRideData.pickup_lat);
-    setPickupLng(existingRideData.pickup_lng);
-    setPassengerCount(existingRideData.passenger_count);
-
-    setShowExistingRideModal(false);
-    setExistingRideData(null);
-    setError("");
-  };
-
-  // Handle "Cancel" - stay on form
-  const handleCancelExistingRide = () => {
-    setShowExistingRideModal(false);
-    setExistingRideData(null);
-  };
-
   const handleRideSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (rideSubmitLock.current) return;
 
     try {
       if (passengerCount < 1 || passengerCount > 4) {
@@ -504,6 +450,7 @@ function RiderContent() {
         }
       }
 
+      rideSubmitLock.current = true;
       setIsLoading(true);
       setError("");
 
@@ -525,8 +472,7 @@ function RiderContent() {
         }),
       },
       {
-        rider_phone: rideRequest.rider_phone,
-        client_id: clientId,
+        access_token: rideAccessToken,
       });
 
       if (error) {
@@ -536,7 +482,8 @@ function RiderContent() {
       }
 
       if (data) {
-        setRideRequest(data);
+        const status = await getRideRequestById(data.id, { access_token: rideAccessToken });
+        if (status.data) applyRideStatus(status.data);
         setIsEditingRide(false);
         setStep("status");
         setIsLoading(false);
@@ -555,6 +502,9 @@ function RiderContent() {
       passenger_count: passengerCount,
     };
 
+    const storedAccessToken = rideAccessToken || localStorage.getItem("ralli_ride_access_token");
+    if (storedAccessToken) payload.access_token = storedAccessToken;
+
     // Add direction and dropoff if event has location
     if (event?.event_address && dropoffAddress) {
       payload.ride_direction = rideDirection;
@@ -562,8 +512,6 @@ function RiderContent() {
       payload.dropoff_lat = dropoffLat;
       payload.dropoff_lng = dropoffLng;
     }
-
-    if (clientId) payload.client_id = clientId;
 
     const resp = await fetch(`/api/rides`, {
       method: "POST",
@@ -581,12 +529,16 @@ function RiderContent() {
       setRideRequest(existingRide);
       setError(""); // Clear any prior error
 
-      persistRide({ id: existingRide.id, phone: existingRide.rider_phone ?? riderPhone });
+      if (!json.access_token) {
+        setError("Ride access could not be restored. Please use the device that created this ride.");
+        setIsLoading(false);
+        return;
+      }
+      persistRide({ id: existingRide.id, accessToken: json.access_token });
 
       // Queue position comes from the status payload
       const status = await getRideRequestById(existingRide.id, {
-        rider_phone: existingRide.rider_phone ?? riderPhone,
-        client_id: clientId,
+        access_token: json.access_token,
       });
       if (status.data) applyRideStatus(status.data);
 
@@ -595,63 +547,35 @@ function RiderContent() {
       return;
     }
 
-    // If API returned 200 but no error, try to find existing ride by phone/identifier
-    if (resp.ok && !json.error && !json.data) {
-      console.log("Checking for existing ride by phone/identifier...");
-      try {
-        const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
-        if (riderPhone) params.set("rider_phone", riderPhone.trim());
-        if (clientId) params.set("client_id", clientId);
-        const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
-        const checkJson = await check.json();
-        console.log("Existing ride check response:", checkJson);
-        if (check.ok && checkJson?.data) {
-          setExistingRideData(checkJson.data);
-          setShowExistingRideModal(true);
-          setIsLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.error("Error checking existing ride:", err);
-      }
+    if (json.isExisting && !json.data) {
+      setError(json.message || "An active ride exists. Reopen the device used to request it.");
+      setIsLoading(false);
+      return;
     }
 
     if (!resp.ok || json.error) {
-      // If rate limited, attempt to fetch existing ride
-      if (resp.status === 429) {
-        try {
-          const params = new URLSearchParams({ event_id: event!.id, rider_name: riderName.trim() });
-          if (riderPhone) params.set("rider_phone", riderPhone.trim());
-          if (clientId) params.set("client_id", clientId);
-          const check = await fetch(`/api/rides?${params.toString()}`, { method: "GET" });
-          const checkJson = await check.json();
-          if (check.ok && checkJson?.data) {
-            setExistingRideData(checkJson.data);
-            setShowExistingRideModal(true);
-            setIsLoading(false);
-            return;
-          }
-        } catch (err) {
-          console.error("Error fetching existing ride on rate limit:", err);
-        }
-      }
-
+      if (json.cooldown) setCooldownStatus(json.cooldown);
       setError(json.error || "Failed to create ride request");
       setIsLoading(false);
       return;
     }
 
     const data = json.data;
+    const accessToken = json.access_token;
+    if (!data?.id || !accessToken) {
+      setError("The ride was created but its access token was not returned. Contact the event admin before submitting again.");
+      setIsLoading(false);
+      return;
+    }
 
     setRideRequest(data as RideRequest);
     setError(""); // Clear any prior error
 
-    persistRide({ id: data.id, phone: data.rider_phone ?? riderPhone });
+    persistRide({ id: data.id, accessToken });
 
     // Queue position comes from the status payload
     const status = await getRideRequestById(data.id, {
-      rider_phone: data.rider_phone ?? riderPhone,
-      client_id: clientId,
+      access_token: accessToken,
     });
     if (status.data) applyRideStatus(status.data);
 
@@ -661,6 +585,8 @@ function RiderContent() {
       console.error("Error submitting ride:", err);
       setError((err as Error).message || "An unexpected error occurred");
       setIsLoading(false);
+    } finally {
+      rideSubmitLock.current = false;
     }
   };
 
@@ -1012,8 +938,7 @@ function RiderContent() {
                       onExpired={() => {
                         // Refresh ride status when expired
                         getRideRequestById(rideRequest.id, {
-                          rider_phone: rideRequest.rider_phone,
-                          client_id: clientId,
+                          access_token: rideAccessToken,
                         }).then(({ data }) => {
                           if (data) applyRideStatus(data);
                         });
@@ -1066,10 +991,15 @@ function RiderContent() {
                   onClick={() => {
                     setStep("form");
                     setRideRequest(null);
+                    setRideAccessToken(null);
                     setRiderName("");
                     setRiderPhone("");
                     setPickupAddress("");
                     setPassengerCount(1);
+                    try {
+                      localStorage.removeItem("ralli_ride_id");
+                      localStorage.removeItem("ralli_ride_access_token");
+                    } catch {}
                   }}
                 >
                   Request Another Ride
@@ -1169,86 +1099,6 @@ function RiderContent() {
           <EmergencyButton onTrigger={handleEmergency} />
         )}
 
-      {/* Existing Ride Modal - Option A: Prompt user when duplicate detected */}
-      {showExistingRideModal && existingRideData && (
-        <>
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <Card className="w-full max-w-md">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-amber-500">
-                  <AlertTriangle className="h-5 w-5" />
-                  Ride Already Exists
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-dark-300">
-                  You already have an active ride in the queue. Would you like to view it or edit your request?
-                </p>
-
-                <div className="bg-dark-800 rounded-lg p-3 space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-dark-400">Pickup Location:</span>
-                    <span className="text-dark-200">{existingRideData.pickup_address}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-dark-400">Passengers:</span>
-                    <span className="text-dark-200">{existingRideData.passenger_count}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-dark-400">Status:</span>
-                    <RideStatusBadge status={existingRideData.status} />
-                  </div>
-                </div>
-
-              <div className="space-y-2">
-                {/* If driver hasn't arrived yet, prioritize edit button */}
-                {["waiting", "assigned"].includes(existingRideData.status) ? (
-                  <>
-                    <Button
-                      onClick={handleEditExistingRide}
-                      className="w-full"
-                      variant="primary"
-                    >
-                      Edit Request
-                    </Button>
-                    <p className="text-xs text-dark-400 text-center">
-                      You can edit your pickup location or passenger count
-                    </p>
-                    <Button
-                      onClick={handleViewExistingRide}
-                      className="w-full"
-                      variant="secondary"
-                    >
-                      View Ride Status
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      onClick={handleViewExistingRide}
-                      className="w-full"
-                      variant="primary"
-                    >
-                      View Ride Status
-                    </Button>
-                    <p className="text-xs text-dark-400 text-center">
-                      Driver is on the way - editing not available
-                    </p>
-                  </>
-                )}
-                <Button
-                  onClick={handleCancelExistingRide}
-                  className="w-full"
-                  variant="ghost"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          </div>
-        </>
-      )}
     </div>
   );
 }

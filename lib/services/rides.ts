@@ -1,80 +1,5 @@
 import { supabase } from "@/lib/supabaseClient";
-import { RideRequest, CreateRideRequestInput, RideStatus } from "@/types/database";
-
-// Check for existing active ride (prevents duplicates when rider closes window and re-submits)
-async function getExistingActiveRide(
-  eventId: string,
-  riderIdentifierHash: string | undefined
-): Promise<RideRequest | null> {
-  if (!riderIdentifierHash) return null;
-  const { data } = await supabase
-    .from("ride_requests")
-    .select("*")
-    .eq("event_id", eventId)
-    .eq("rider_identifier_hash", riderIdentifierHash)
-    .in("status", ["waiting", "assigned", "arrived", "in_progress"])
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return data;
-}
-
-// Create a new ride request (returns existing active ride if rider already has one - prevents duplicates)
-export async function createRideRequest(
-  input: CreateRideRequestInput
-): Promise<{ data: RideRequest | null; error: Error | null }> {
-  // Phone number is required
-  const phoneDigits = (input.rider_phone || "").replace(/\D/g, "");
-  if (phoneDigits.length < 10) {
-    return {
-      data: null,
-      error: new Error("Phone number is required (at least 10 digits)"),
-    };
-  }
-
-  // Prevent duplicate: if rider already has an active ride, return that instead
-  const existing = await getExistingActiveRide(
-    input.event_id,
-    input.rider_identifier_hash
-  );
-  if (existing) {
-    return { data: existing, error: null };
-  }
-
-  const insertData: Record<string, any> = {
-    event_id: input.event_id,
-    rider_name: input.rider_name,
-    rider_phone: input.rider_phone || null,
-    pickup_address: input.pickup_address,
-    pickup_lat: input.pickup_lat,
-    pickup_lng: input.pickup_lng,
-    passenger_count: input.passenger_count,
-    status: "waiting" as RideStatus,
-    rider_confirmed: false,
-  };
-
-  // Include rider identifier hash if provided (for penalty/consent tracking)
-  if (input.rider_identifier_hash) {
-    insertData.rider_identifier_hash = input.rider_identifier_hash;
-  }
-  // Normalize phone for easier matching
-  if (input.rider_phone) {
-    const digits = (input.rider_phone || "").replace(/\D/g, "");
-    if (digits.length >= 10) insertData.rider_phone_normalized = digits;
-  }
-
-  const { data, error } = await supabase
-    .from("ride_requests")
-    .insert(insertData)
-    .select()
-    .single();
-
-  if (error) {
-    return { data: null, error: new Error(error.message) };
-  }
-
-  return { data, error: null };
-}
+import { RideRequest } from "@/types/database";
 
 export interface RideStatusPayload {
   ride: RideRequest;
@@ -99,13 +24,11 @@ export async function getRideRequestById(
   identity?: RideIdentity
 ): Promise<{ data: RideStatusPayload | null; error: Error | null }> {
   try {
-    const params = new URLSearchParams();
-    if (identity?.rider_phone) params.set("rider_phone", identity.rider_phone);
-    if (identity?.client_id) params.set("client_id", identity.client_id);
-
-    const query = params.toString();
+    const headers: Record<string, string> = {};
+    if (identity?.access_token) headers["X-Ralli-Ride-Token"] = identity.access_token;
     const res = await fetch(
-      `/api/rides/${requestId}${query ? `?${query}` : ""}`
+      `/api/rides/${requestId}`,
+      { headers }
     );
 
     if (!res.ok) {
@@ -142,81 +65,10 @@ export async function getEventRideRequests(
   return { data: data || [], error: null };
 }
 
-// Queue position is now computed server-side and returned by
-// GET /api/rides/[id]; ride_requests has no public SELECT policy, so the
-// browser can no longer calculate it itself.
-
-export async function getQueuePosition(): Promise<{ position: number; total: number }> {
-  return { position: 0, total: 0 };
-}
-
-// Assign driver to ride request
-export async function assignDriverToRide(
-  requestId: string,
-  driverId: string
-): Promise<{ error: Error | null }> {
-  // Update ride request
-  const { error: rideError } = await supabase
-    .from("ride_requests")
-    .update({
-      assigned_driver_id: driverId,
-      status: "assigned" as RideStatus,
-    })
-    .eq("id", requestId);
-
-  if (rideError) {
-    return { error: new Error(rideError.message) };
-  }
-
-  // Update driver status
-  const { error: driverError } = await supabase
-    .from("drivers")
-    .update({ current_status: "assigned" })
-    .eq("id", driverId);
-
-  if (driverError) {
-    return { error: new Error(driverError.message) };
-  }
-
-  return { error: null };
-}
-
-// Update ride status
-export async function updateRideStatus(
-  requestId: string,
-  status: RideStatus,
-  driverId?: string
-): Promise<{ error: Error | null }> {
-  const { error: rideError } = await supabase
-    .from("ride_requests")
-    .update({ status })
-    .eq("id", requestId);
-
-  if (rideError) {
-    return { error: new Error(rideError.message) };
-  }
-
-  // If completing ride, set driver back to available
-  if (status === "completed" && driverId) {
-    const { error: driverError } = await supabase
-      .from("drivers")
-      .update({ current_status: "available" })
-      .eq("id", driverId);
-
-    if (driverError) {
-      return { error: new Error(driverError.message) };
-    }
-  }
-
-  return { error: null };
-}
-
-// Riders are unauthenticated, so they must prove ownership of the ride by
-// reproducing its identifier (phone or client_id). Drivers/admins rely on
-// their session instead and can omit `identity`.
+// Riders are unauthenticated, so they must present the random ride capability
+// token. Drivers/admins rely on their session and can omit `identity`.
 export interface RideIdentity {
-  rider_phone?: string | null;
-  client_id?: string | null;
+  access_token?: string | null;
 }
 
 // Cancel ride request

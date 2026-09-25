@@ -5,10 +5,58 @@ import {
   getExpiredNoShowRides,
   processNoShow,
 } from "@/lib/services/safetyService";
+import { autoAssignAllRides } from "@/lib/services/rides-dispatch";
+
+export const maxDuration = 60;
 
 // This endpoint should be called periodically (e.g., every minute).
 // Scheduled by Vercel Cron (see vercel.json), which sends
 // `Authorization: Bearer $CRON_SECRET`.
+
+// Drain the waiting queue for every live auto-dispatch event. Bounded overall
+// so this stays inside the route's 60s maxDuration.
+async function sweepDispatch(admin: ReturnType<typeof createAdminClient>) {
+  const sweepDeadline = Date.now() + 40_000;
+  const dispatched: Array<{ event_id: string; assigned: number; timed_out: boolean }> = [];
+
+  const nowIso = new Date().toISOString();
+  const { data: events, error } = await admin
+    .from("events")
+    .select("id")
+    .eq("is_active", true)
+    .eq("auto_dispatch_enabled", true)
+    .lte("start_time", nowIso)
+    .gte("end_time", nowIso);
+
+  if (error) {
+    console.error("[cron] could not list events for dispatch sweep:", error.message);
+    return dispatched;
+  }
+
+  for (const event of events ?? []) {
+    if (Date.now() >= sweepDeadline) break;
+
+    const { count } = await admin
+      .from("ride_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("event_id", event.id)
+      .eq("status", "waiting");
+    if (!count) continue;
+
+    const { assignedCount, timedOut, error: dispatchError } = await autoAssignAllRides(event.id, {
+      budgetMs: 10_000,
+    });
+    if (dispatchError) {
+      console.error(`[cron] dispatch sweep failed for event ${event.id}:`, dispatchError.message);
+      continue;
+    }
+    if (assignedCount > 0 || timedOut) {
+      dispatched.push({ event_id: event.id, assigned: assignedCount, timed_out: timedOut });
+    }
+  }
+
+  return dispatched;
+}
 
 async function run() {
   try {
@@ -27,30 +75,15 @@ async function run() {
       );
     }
 
-    if (!expiredRides || expiredRides.length === 0) {
-      return NextResponse.json({
-        success: true,
-        processed: 0,
-        message: "No expired rides to process",
-      });
-    }
-
     // Process each expired ride
     const results = [];
-    for (const ride of expiredRides) {
-      const { data: rideRow } = await admin
-        .from("ride_requests")
-        .select("passenger_count")
-        .eq("id", ride.ride_id)
-        .maybeSingle();
-
+    for (const ride of expiredRides ?? []) {
       const { success, error } = await processNoShow(
         ride.ride_id,
         ride.event_id,
         ride.rider_identifier_hash,
         ride.assigned_driver_id,
-        admin,
-        rideRow?.passenger_count || 0
+        admin
       );
 
       results.push({
@@ -68,11 +101,17 @@ async function run() {
 
     const successCount = results.filter((r) => r.success).length;
 
+    // Dispatch sweep. Ride creation only runs a short opportunistic pass, so
+    // anything it left waiting is picked up here within the minute - including
+    // the case where no further ride is submitted to trigger another pass.
+    const dispatched = await sweepDispatch(admin);
+
     return NextResponse.json({
       success: true,
       processed: successCount,
-      total: expiredRides.length,
+      total: (expiredRides ?? []).length,
       results,
+      dispatched,
     });
   } catch (error) {
     console.error("Error in process-noshow cron:", error);

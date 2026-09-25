@@ -111,12 +111,25 @@ export function AdminDriverMap({ drivers, className = "" }: AdminDriverMapProps)
         });
         marker.addListener("click", () => {
           if (infoWindowRef.current) {
-            infoWindowRef.current.setContent(
-              `<div style="padding:8px;min-width:140px;color:#1f2937;">
-                <strong style="color:#111;">${name}</strong><br/>
-                <span style="color:#6b7280;font-size:12px;text-transform:capitalize;">${status}</span>
-              </div>`
-            );
+            // Driver names are user-provided. Build the content with text
+            // nodes instead of interpolating into HTML (XSS in the admin map).
+            const content = document.createElement("div");
+            content.style.padding = "8px";
+            content.style.minWidth = "140px";
+            content.style.color = "#1f2937";
+
+            const nameEl = document.createElement("strong");
+            nameEl.style.color = "#111";
+            nameEl.textContent = name;
+
+            const statusEl = document.createElement("span");
+            statusEl.style.color = "#6b7280";
+            statusEl.style.fontSize = "12px";
+            statusEl.style.textTransform = "capitalize";
+            statusEl.textContent = status;
+
+            content.append(nameEl, document.createElement("br"), statusEl);
+            infoWindowRef.current.setContent(content);
             infoWindowRef.current.open(map, marker!);
           }
         });

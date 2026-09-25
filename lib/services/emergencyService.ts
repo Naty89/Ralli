@@ -9,32 +9,26 @@ export async function triggerEmergency(
   triggeredBy: EmergencyTrigger,
   triggeredByName: string,
   latitude?: number,
-  longitude?: number
+  longitude?: number,
+  identity?: { access_token?: string | null }
 ): Promise<{ data: EmergencyEvent | null; error: Error | null }> {
   try {
-    const { data, error } = await supabase
-      .from("emergency_events")
-      .insert({
+    const response = await fetch("/api/emergency", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         event_id: eventId,
         ride_request_id: rideRequestId,
         triggered_by: triggeredBy,
         triggered_by_name: triggeredByName,
         latitude,
         longitude,
-        resolved: false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      return { data: null, error: new Error(error.message) };
-    }
-
-    // Attempt to send notification to admin
-    const emergency = data as EmergencyEvent;
-    await sendEmergencyNotification(eventId, emergency);
-
-    return { data: emergency, error: null };
+        access_token: identity?.access_token ?? null,
+      }),
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) return { data: null, error: new Error(json.error ?? "Failed to report emergency") };
+    return { data: json.data as EmergencyEvent, error: null };
   } catch (err) {
     return { data: null, error: err as Error };
   }

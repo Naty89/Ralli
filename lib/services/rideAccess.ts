@@ -2,7 +2,7 @@
 //
 // Riders are unauthenticated, so we cannot rely on RLS alone. A caller is
 // allowed to modify a ride if either:
-//   1. they can reproduce the ride's stable identifier (phone or client_id), or
+//   1. they have the random capability token issued when the ride was created, or
 //   2. they have a session as the admin who owns the event, or the driver
 //      currently assigned to the ride.
 
@@ -10,8 +10,7 @@ import { createAdminClient, createServerSupabaseClient } from "@/lib/supabaseSer
 import nodeCrypto from "crypto";
 
 export interface RideIdentity {
-  rider_phone?: string | null;
-  client_id?: string | null;
+  access_token?: string | null;
 }
 
 export type RideActor = "rider" | "driver" | "admin";
@@ -24,14 +23,11 @@ export interface RideAuthorization {
   actor?: RideActor;
 }
 
-function normalizePhone(phone?: string | null): string | null {
-  if (!phone) return null;
-  const digits = phone.replace(/\D/g, "");
-  return digits.length >= 10 ? digits : null;
-}
-
-function hashIdentifier(eventId: string, seed: string): string {
-  return nodeCrypto.createHash("sha256").update(`${eventId}:${seed}`).digest("hex");
+function isValidAccessToken(token: string | null | undefined, storedHash: string | null): boolean {
+  if (!token || !storedHash) return false;
+  const candidate = nodeCrypto.createHash("sha256").update(token).digest();
+  const stored = Buffer.from(storedHash, "hex");
+  return candidate.length === stored.length && nodeCrypto.timingSafeEqual(candidate, stored);
 }
 
 export async function authorizeRideMutation(
@@ -47,27 +43,17 @@ export async function authorizeRideMutation(
     .eq("id", rideId)
     .maybeSingle();
 
-  if (rideError || !ride) {
+  if (rideError) {
+    console.error("[rideAccess] ride lookup failed:", rideError.message);
+    return { ok: false, status: 503, error: "Ride status temporarily unavailable" };
+  }
+  if (!ride) {
     return { ok: false, status: 404, error: "Ride not found" };
   }
 
-  // 1) Rider proves ownership by reproducing the stored identifier.
-  const candidates: string[] = [];
-  const phoneDigits = normalizePhone(identity.rider_phone);
-
-  if (phoneDigits) {
-    candidates.push(hashIdentifier(ride.event_id, phoneDigits));
-    // Older rides may have been created before the phone-based identifier.
-    if (ride.rider_phone_normalized === phoneDigits) {
-      return { ok: true, status: 200, ride, actor: "rider" };
-    }
-  }
-
-  if (identity.client_id) {
-    candidates.push(hashIdentifier(ride.event_id, identity.client_id));
-  }
-
-  if (ride.rider_identifier_hash && candidates.includes(ride.rider_identifier_hash)) {
+  // 1) Riders prove ownership with the random capability token returned only
+  // by the ride-creation response. Phone numbers are contact data, not secrets.
+  if (isValidAccessToken(identity.access_token, ride.rider_access_token_hash)) {
     return { ok: true, status: 200, ride, actor: "rider" };
   }
 

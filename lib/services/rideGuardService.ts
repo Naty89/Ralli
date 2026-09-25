@@ -1,18 +1,6 @@
 import { createAdminClient } from "@/lib/supabaseServer";
-import crypto from "crypto";
 
 const ACTIVE_STATUSES = ["waiting", "assigned", "arrived", "in_progress"];
-
-// Generate SHA-256 hex identifier from eventId, normalized riderName, ip, and userAgent
-export function generateRiderIdentifier(
-  eventId: string,
-  riderName: string,
-  ipAddress: string,
-  userAgent: string
-): string {
-  const normalized = `${eventId}:${(riderName || "").toLowerCase().trim()}:${ipAddress}:${userAgent}`;
-  return crypto.createHash("sha256").update(normalized).digest("hex");
-}
 
 export function normalizePhone(phone?: string): string | null {
   if (!phone) return null;

@@ -88,14 +88,30 @@ const anon = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-for (const t of ["profiles", "events", "drivers", "ride_requests", "rider_penalties", "rider_rate_limits"]) {
+for (const t of [
+  "profiles",
+  "events",
+  "drivers",
+  "ride_requests",
+  "ride_batches",
+  "ride_batch_items",
+  "rider_consents",
+  "emergency_events",
+  "rider_penalties",
+  "rider_rate_limits",
+]) {
+  const { count: serviceCount, error: serviceError } = await admin
+    .from(t)
+    .select("id", { count: "exact", head: true });
   const { data, error } = await anon.from(t).select("*").limit(1);
   if (error) {
     console.log(`  ${t.padEnd(20)} BLOCKED (${error.code}) :: ${error.message}`);
   } else if (data && data.length > 0) {
     console.log(`  ${t.padEnd(20)} *** READABLE BY ANYONE *** sample keys: ${Object.keys(data[0]).slice(0, 8).join(",")}`);
+  } else if (!serviceError && (serviceCount ?? 0) === 0) {
+    console.log(`  ${t.padEnd(20)} EMPTY - anon test is inconclusive; inspect pg_policies`);
   } else {
-    console.log(`  ${t.padEnd(20)} no rows returned (RLS filtered, or empty)`);
+    console.log(`  ${t.padEnd(20)} BLOCKED (service rows exist; anon returned none)`);
   }
 }
 

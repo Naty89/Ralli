@@ -217,6 +217,7 @@ export async function getAvailableDriverProfiles(
     .from("profiles")
     .select("*")
     .eq("role", "driver")
+    .eq("approval_status", "approved")
     .eq("organization_code", organizationCode);
 
   if (driversError) {

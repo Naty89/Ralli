@@ -61,7 +61,7 @@ export default function DriverLoginPage() {
           </h1>
           <p className="text-dark-400 mt-2">
             {isSignUp
-              ? "Sign up as a sober driver"
+              ? "Apply to join an organization as a sober driver"
               : "Sign in to view your assignments"}
           </p>
         </div>
@@ -87,7 +87,7 @@ export default function DriverLoginPage() {
                 required
               />
               <p className="text-xs text-dark-500 -mt-2">
-                Get this code from your admin/event organizer
+                Get this code from your admin. Your profile requires organization approval before you can drive.
               </p>
             </>
           )}

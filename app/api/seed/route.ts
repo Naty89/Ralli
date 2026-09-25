@@ -69,6 +69,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from("profiles").upsert({
         id: adminId,
         role: "admin",
+        approval_status: "approved",
         full_name: "Test Admin",
         fraternity_name: "Alpha Beta Gamma",
       });
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from("profiles").upsert({
         id: driver1Id,
         role: "driver",
+        approval_status: "approved",
         full_name: "Mike Johnson",
         fraternity_name: "Alpha Beta Gamma",
       });
@@ -87,6 +89,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from("profiles").upsert({
         id: driver2Id,
         role: "driver",
+        approval_status: "approved",
         full_name: "Chris Smith",
         fraternity_name: "Alpha Beta Gamma",
       });
@@ -96,6 +99,7 @@ export async function POST(request: Request) {
       await supabaseAdmin.from("profiles").upsert({
         id: driver3Id,
         role: "driver",
+        approval_status: "approved",
         full_name: "Alex Brown",
         fraternity_name: "Alpha Beta Gamma",
       });

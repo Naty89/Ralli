@@ -7,22 +7,22 @@
 -- Example: Create test admin and driver profiles
 -- Replace these UUIDs with actual auth.users IDs after creating users
 
--- INSERT INTO profiles (id, role, full_name, fraternity_name) VALUES
---     ('ADMIN_USER_UUID_HERE', 'admin', 'John Admin', 'Alpha Beta Gamma'),
---     ('DRIVER_USER_UUID_HERE', 'driver', 'Mike Driver', 'Alpha Beta Gamma');
+-- INSERT INTO profiles (id, role, approval_status, full_name, fraternity_name) VALUES
+--     ('ADMIN_USER_UUID_HERE', 'admin', 'approved', 'John Admin', 'Alpha Beta Gamma'),
+--     ('DRIVER_USER_UUID_HERE', 'driver', 'approved', 'Mike Driver', 'Alpha Beta Gamma');
 
 -- For testing purposes, here's a complete seed script:
 -- Uncomment and modify after creating auth users
 
 /*
 -- Test Admin Profile
-INSERT INTO profiles (id, role, full_name, fraternity_name) VALUES
-    ('11111111-1111-1111-1111-111111111111', 'admin', 'Alex Thompson', 'Alpha Beta Gamma');
+INSERT INTO profiles (id, role, approval_status, full_name, fraternity_name) VALUES
+    ('11111111-1111-1111-1111-111111111111', 'admin', 'approved', 'Alex Thompson', 'Alpha Beta Gamma');
 
 -- Test Driver Profiles
-INSERT INTO profiles (id, role, full_name, fraternity_name) VALUES
-    ('22222222-2222-2222-2222-222222222222', 'driver', 'Brandon Miller', 'Alpha Beta Gamma'),
-    ('33333333-3333-3333-3333-333333333333', 'driver', 'Chris Johnson', 'Alpha Beta Gamma');
+INSERT INTO profiles (id, role, approval_status, full_name, fraternity_name) VALUES
+    ('22222222-2222-2222-2222-222222222222', 'driver', 'approved', 'Brandon Miller', 'Alpha Beta Gamma'),
+    ('33333333-3333-3333-3333-333333333333', 'driver', 'approved', 'Chris Johnson', 'Alpha Beta Gamma');
 
 -- Test Event
 INSERT INTO events (id, fraternity_name, event_name, access_code, start_time, end_time, is_active, created_by) VALUES
